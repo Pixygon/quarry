@@ -1,0 +1,17 @@
+[package]
+name = "chisel"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pixygon"]
+license = "MIT OR Apache-2.0"
+description = "Chisel — the Thread's mesher: turns shape recipes (signed-distance trees) into renderable meshes. Blender for agents, one word at a time."
+
+[dependencies]
+infinite-manifest = { package = "thread-manifest", path = "../infinite-manifest" }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Models as PROGRAMS: a Weft package export evaluates to a model. Weft is
+# pure Rust and dependency-light — the browser can carry it too.
+weft = { path = "../weft" }
+
+[dev-dependencies]

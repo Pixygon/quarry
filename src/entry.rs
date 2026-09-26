@@ -149,7 +149,7 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
     // inorganic) and Grove (grown: trees and what hangs on them). Third-party
     // wpm packages come later. Sockets are MEASURED where the recipe yields
     // them (a grown tree ends in tips); declared ones are kept otherwise.
-    let (built, sockets, lod_meshes): (chisel::model::Built, Vec<Socket>, Vec<chisel::MeshData>) =
+    let (built, sockets, lod_models): (chisel::model::Built, Vec<Socket>, Vec<chisel::model::Built>) =
         match sub.package.as_str() {
             "weft-model" => {
                 let library = chisel::weft_model::standard_library();
@@ -167,8 +167,7 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
                     .iter()
                     .map(|s| Socket { name: s.name.clone(), at: s.position, kind: "tip".into(), size: [s.radius * 2.0; 3] })
                     .collect();
-                let lods = grown.lods.into_iter().skip(1).collect();
-                (grown.built, sockets, lods)
+                (grown.built, sockets, grown.lods)
             }
             other => {
                 return Err(format!("unknown package '{other}' — 'weft-model' and 'grove' are available in this Quarry"));
@@ -180,19 +179,8 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
     std::fs::write(data.join(format!("{design}.glb")), &glb)
         .map_err(|e| format!("cannot store artifact: {e}"))?;
     let mut lods: Vec<String> = Vec::new();
-    for (i, mesh) in lod_meshes.into_iter().enumerate() {
-        let Some(part) = built.parts.first() else { break };
-        let lod_built = chisel::model::Built {
-            name: format!("{}-lod{}", built.name, i + 1),
-            parts: vec![chisel::model::BuiltPart {
-                name: part.name.clone(),
-                mesh,
-                baked: part.baked.clone(),
-                color: part.color,
-                emissive: part.emissive,
-            }],
-        };
-        let lod_glb = chisel::model::export_glb(&lod_built)?;
+    for (i, lod_built) in lod_models.iter().enumerate() {
+        let lod_glb = chisel::model::export_glb(lod_built)?;
         let file = format!("{design}.lod{}.glb", i + 1);
         std::fs::write(data.join(&file), &lod_glb).map_err(|e| format!("cannot store lod: {e}"))?;
         lods.push(format!("/models/{file}"));

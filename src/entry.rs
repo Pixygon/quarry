@@ -501,3 +501,229 @@ pub fn search(entries: &[Entry], q: &BTreeMap<String, String>) -> Vec<serde_json
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("quarry-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).expect("temp dir");
+        d
+    }
+
+    fn column(title: &str, height: f32) -> Submission {
+        Submission {
+            title: title.into(),
+            description: String::new(),
+            tags: vec!["column".into()],
+            kind: "column".into(),
+            style: String::new(),
+            package: "weft-model".into(),
+            export: "column".into(),
+            args: vec![serde_json::json!(height), serde_json::json!(0.44)],
+            recipe: None,
+            material: "marble".into(),
+            license: "CC0-1.0".into(),
+            author: String::new(),
+            origin: "authored".into(),
+            sockets: Vec::new(),
+            codex: String::new(),
+            concept: String::new(),
+        }
+    }
+
+    /// The design is the hash of the RECIPE. What a publisher calls it, tags
+    /// it or licenses it must not fork the shelf into near-duplicates.
+    #[test]
+    fn words_do_not_change_the_design() {
+        let mut a = column("Doric column, 5.2 m", 5.2);
+        let mut b = column("A handsome weathered column", 5.2);
+        b.tags = vec!["fancy".into()];
+        b.license = "MIT".into();
+        b.author = "someone else".into();
+        b.kind = "pillar".into();
+        assert_eq!(design_id(&a), design_id(&b));
+        a.material = "granite".into();
+        assert_ne!(design_id(&a), design_id(&b), "the material is part of the recipe");
+    }
+
+    /// 5.2 and 5.200000001 are one column, not two.
+    #[test]
+    fn float_noise_does_not_fork_a_design() {
+        let a = column("c", 5.2);
+        let b = column("c", 5.200_000_1);
+        assert_eq!(design_id(&a), design_id(&b));
+        assert_ne!(design_id(&a), design_id(&column("c", 5.3)));
+    }
+
+    /// The lesson of 2026-09-26: the Quarry hashed the DEFAULT-FILLED grow
+    /// recipe, so adding one field with a default renamed every grown design
+    /// and orphaned five of them. A terse spelling and an exhaustive one are
+    /// the same tree, and a new rule nobody set must not rename anything.
+    #[test]
+    fn a_grove_design_hashes_only_what_the_recipe_says() {
+        let terse = serde_json::json!({ "name": "oak", "seed": 5, "height": 2.2 });
+        let mut exhaustive = serde_json::to_value(grove::GrowRecipe::default()).unwrap();
+        exhaustive["name"] = serde_json::json!("oak");
+        exhaustive["seed"] = serde_json::json!(5);
+        exhaustive["height"] = serde_json::json!(2.2);
+
+        let mut a = column("Oak", 1.0);
+        a.package = "grove".into();
+        a.export = String::new();
+        a.args = Vec::new();
+        a.material = String::new();
+        let mut b = a.clone();
+        a.recipe = Some(terse);
+        b.recipe = Some(exhaustive);
+        assert_eq!(design_id(&a), design_id(&b), "one tree, two spellings");
+
+        // …and a rule left at its default contributes nothing to the id.
+        let canon = canonical_recipe(&a).expect("a grove recipe canonicalises");
+        let obj = canon.as_object().expect("an object");
+        assert!(obj.contains_key("height"), "a set rule is kept");
+        assert!(!obj.contains_key("taper"), "a defaulted rule is dropped: {obj:?}");
+    }
+
+    /// Re-deriving is how a grower change reaches the shelf. The judgement
+    /// and the concept belong to the design, not to the run that made it.
+    #[test]
+    fn re_deriving_keeps_the_verdicts_and_the_concept() {
+        let data = tmp("carry");
+        let mut sub = column("Doric column, 5.2 m", 5.2);
+        sub.codex = "lantern-desert".into();
+        sub.concept = "https://example.test/concept.jpg".into();
+        let first = derive(&sub, &data).expect("derives");
+        assert!(first.verdicts.is_empty());
+
+        // a person looks at it and says something
+        let mut stored = first.clone();
+        stored.verdicts.push(Verdict {
+            verdict: "close".into(),
+            note: "shaft is thin".into(),
+            by: String::new(),
+            at: 1,
+        });
+        std::fs::write(
+            data.join(format!("{}.json", stored.design)),
+            serde_json::to_string(&stored).unwrap(),
+        )
+        .unwrap();
+
+        // the same recipe, republished with no words about the codex at all
+        let mut again = column("Doric column, 5.2 m", 5.2);
+        again.title = "Renamed".into();
+        let second = derive(&again, &data).expect("re-derives");
+        assert_eq!(second.design, first.design);
+        assert_eq!(second.verdicts.len(), 1, "the verdict survived the republish");
+        assert_eq!(second.verdicts[0].note, "shaft is thin");
+        assert_eq!(second.codex, "lantern-desert", "the codex link survived");
+        assert_eq!(second.concept, "https://example.test/concept.jpg");
+        assert_eq!(second.title, "Renamed", "but the words are the new ones");
+        assert_eq!(second.supplier, "chisel");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// "Look before you publish" means exactly that: an artifact to open, and
+    /// nothing on the shelf.
+    #[test]
+    fn a_scratch_derive_is_not_an_entry() {
+        let scratch = tmp("scratch");
+        let e = derive_scratch(&column("Probe", 3.0), &scratch).expect("derives");
+        assert!(e.artifact.url.starts_with("/derived/"), "{}", e.artifact.url);
+        assert!(e.preview.starts_with("/derived/"));
+        assert!(scratch.join(format!("{}.glb", e.design)).exists());
+        let entries: Vec<_> = std::fs::read_dir(&scratch)
+            .unwrap()
+            .flatten()
+            .filter(|f| f.file_name().to_string_lossy().ends_with(".json"))
+            .collect();
+        assert!(entries.is_empty(), "a look is not an entry: {entries:?}");
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// The drawer is swept, or it becomes a shelf nobody curates.
+    #[test]
+    fn the_scratch_drawer_is_swept() {
+        let scratch = tmp("sweep");
+        for i in 0..6u32 {
+            std::fs::write(scratch.join(format!("{i:016x}.glb")), b"x").unwrap();
+            std::fs::write(scratch.join(format!("{i:016x}.png")), b"x").unwrap();
+            // mtime resolution is coarse; make the order unambiguous
+            std::thread::sleep(std::time::Duration::from_millis(12));
+        }
+        sweep(&scratch, 2);
+        let left: Vec<String> = std::fs::read_dir(&scratch)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".glb"))
+            .collect();
+        assert_eq!(left.len(), 2, "kept: {left:?}");
+        assert!(left.iter().all(|n| n.starts_with("0000000000000004") || n.starts_with("0000000000000005")),
+                "the newest two stay: {left:?}");
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// Facts are measured off the mesh, not copied from the submission.
+    #[test]
+    fn the_facts_are_measured() {
+        let data = tmp("facts");
+        let e = derive(&column("Doric column, 5.2 m", 5.2), &data).expect("derives");
+        assert!((e.facts.size[1] - 5.2).abs() < 0.01, "height is the mesh's: {:?}", e.facts.size);
+        assert_eq!(e.facts.origin, "base", "a column rests on y = 0");
+        assert_eq!(e.facts.collider, "cylinder", "tall and square in plan");
+        assert_eq!(e.facts.front, "+z");
+        assert!(e.artifact.tris > 0 && e.artifact.bytes > 0);
+        assert_eq!(e.artifact.sha256.len(), 64);
+        assert_eq!(e.facts.materials, vec!["marble".to_string()]);
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn a_submission_without_a_title_is_refused() {
+        let data = tmp("untitled");
+        let mut sub = column("  ", 5.2);
+        sub.title = "  ".into();
+        assert!(derive(&sub, &data).is_err());
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn an_unknown_package_is_refused_by_name() {
+        let data = tmp("unknown");
+        let mut sub = column("x", 1.0);
+        sub.package = "speedtree".into();
+        let err = derive(&sub, &data).unwrap_err();
+        assert!(err.contains("speedtree"), "{err}");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// Search is for a layout engine: the wrong kind is a wrong answer, not a
+    /// near miss, and the right size outranks the wrong one.
+    #[test]
+    fn search_ranks_by_fit_and_refuses_the_wrong_kind() {
+        let data = tmp("search");
+        let tall = derive(&column("Tall", 5.2), &data).expect("derives");
+        let short = derive(&column("Short", 3.0), &data).expect("derives");
+        let all = vec![tall.clone(), short.clone()];
+
+        let q: BTreeMap<String, String> = [("kind", "column"), ("h", "3.0"), ("tol", "0.3")]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let hits = search(&all, &q);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0]["design"], serde_json::json!(short.design), "the 3 m one fits 3 m");
+        assert_eq!(hits[0]["fit"], serde_json::json!("exact"));
+
+        let q: BTreeMap<String, String> = [("kind", "amphora")]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        assert!(search(&all, &q).is_empty(), "a column is not an amphora");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+}

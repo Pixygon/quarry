@@ -123,3 +123,56 @@ pub fn catalog() -> Value {
         "grove": { "blank": blank },
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The door's forms are shaped by the library's own declared arity. If a
+    /// shape's arg list and the library disagree the shape is hidden rather
+    /// than drawn wrong — so an empty or shrinking catalog is the signal that
+    /// `weft-model` moved under us.
+    #[test]
+    fn every_offered_shape_matches_the_library() {
+        let c = catalog();
+        let models = c["models"].as_array().expect("models");
+        assert_eq!(
+            models.len(),
+            SHAPES.len(),
+            "the library no longer agrees with the door — check which shape was dropped"
+        );
+        let column = models
+            .iter()
+            .find(|m| m["export"] == "column")
+            .expect("the library still carves columns");
+        let args = column["args"].as_array().unwrap();
+        assert_eq!(args.len(), 2, "column(height, diameter)");
+        assert_eq!(args[0]["name"], "height");
+        assert_eq!(args[0]["type"], "number");
+        assert_eq!(models.iter().find(|m| m["export"] == "stairs").unwrap()["args"][0]["type"], "int",
+                   "a stair count is a whole number, and the library says so");
+    }
+
+    /// A material is an export that asks for nothing and returns a full PBR
+    /// set — found, not listed, so a new one upstream appears by itself.
+    #[test]
+    fn the_materials_come_from_the_library() {
+        let c = catalog();
+        let mats: Vec<&str> = c["materials"].as_array().unwrap().iter().map(|m| m.as_str().unwrap()).collect();
+        for expected in ["marble", "granite", "terracotta", "wood"] {
+            assert!(mats.contains(&expected), "{expected} is missing from {mats:?}");
+        }
+        assert!(!mats.contains(&"column"), "a shape is not a material");
+        assert!(!mats.contains(&"tint"), "a material *modifier* takes arguments");
+    }
+
+    /// Grove's form is built from the grower's own blank.
+    #[test]
+    fn the_grove_door_starts_from_the_growers_default() {
+        let c = catalog();
+        let blank = c["grove"]["blank"].as_object().expect("a blank recipe");
+        for rule in ["seed", "height", "trunk_radius", "forks", "levels"] {
+            assert!(blank.contains_key(rule), "{rule} is missing from the blank");
+        }
+    }
+}

@@ -47,10 +47,16 @@ is the right addition so a person can look before they publish.
 
 ## Ground rules
 
-- This repo is not a pearl template: commit by path, push. It does **not**
-  redeploy on push — trigger Coolify (`GET <coolify>/api/v1/deploy?uuid=nvsfjj9yuxx2pkzwk4bcwp0v`
-  with the token from `[publishing.coolify]` in `~/.config/dyson-swarm/config.toml`,
-  read into the environment, never printed). Do not run `pearl ship`.
+- **Amended 2026-09-26 (founder):** this repo IS a pearl, of the **crate**
+  type (`Dyson/templates/crate/README.md`). `pearl ship` is the last step —
+  it runs `cargo test`, drafts the changelog, writes the released version
+  into `Cargo.toml`, releases on the API, commits and pushes. Commit by path
+  when another session shares the checkout. Publishing to crates.io stays a
+  human step (`cargo publish -p …`) after the ship.
+- Shipping is not deploying. The app does **not** redeploy on push — trigger
+  Coolify (`GET <coolify>/api/v1/deploy?uuid=nvsfjj9yuxx2pkzwk4bcwp0v` with
+  the token from `[publishing.coolify]` in `~/.config/dyson-swarm/config.toml`,
+  read into the environment, never printed).
 - **Every redeploy wipes the store** until the founder mounts persistent
   storage at `/data` in Coolify. After a deploy, republish the grove recipes
   from `~/repos/thread-engine/crates/grove/recipes` (`thread grow <r> --publish`,

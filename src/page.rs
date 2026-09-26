@@ -166,7 +166,7 @@ pub fn render(entries: &[Entry], current: Option<&Entry>, locked: bool) -> Strin
 
     // ── the data the enhancement reads: the same entries, once ──────────
     h.push_str("<script type=\"application/json\" id=\"models\">");
-    h.push_str(&serde_json::to_string(entries).unwrap_or_else(|_| "[]".into()).replace("</", "<\\/"));
+    h.push_str(&in_script(&serde_json::to_value(entries).unwrap_or_else(|_| serde_json::json!([]))));
     h.push_str("</script>\n");
     h.push_str(&format!(
         "<script type=\"application/json\" id=\"boot\">{{\"current\":{},\"gated\":{locked}}}</script>\n",
@@ -411,16 +411,25 @@ fn ld_json(entries: &[Entry]) -> String {
             })
         })
         .collect();
-    serde_json::json!({
+    let doc = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "CollectionPage",
         "name": "The Quarry",
         "url": "https://quarry.pixygon.io/",
         "description": "The Thread's model store: publish a recipe, the store derives the artifact.",
         "mainEntity": { "@type": "ItemList", "numberOfItems": entries.len(), "itemListElement": items },
-    })
-    .to_string()
-    .replace("</", "<\\/")
+    });
+    in_script(&doc)
+}
+
+/// JSON going inside a `<script>` element. Escaping only `</` is the usual
+/// advice and it is not enough: `<!--<script` puts the tokenizer into the
+/// script-data-double-escaped state, where the element's own closing tag
+/// stops closing it and the rest of the document is swallowed. Escaping
+/// every `<` as `\u003c` costs nothing, parses identically, and leaves no
+/// sequence HTML can react to.
+fn in_script(v: &serde_json::Value) -> String {
+    v.to_string().replace('<', "\\u003c")
 }
 
 fn dims(s: [f32; 3]) -> String {
@@ -460,4 +469,138 @@ fn esc(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entry::{Artifact, Facts, Recipe, Socket, Verdict};
+
+    fn entry(design: &str, title: &str) -> Entry {
+        Entry {
+            design: design.into(),
+            title: title.into(),
+            description: String::new(),
+            tags: vec!["column".into(), "classical".into()],
+            kind: "column".into(),
+            style: "classical".into(),
+            recipe: Recipe {
+                package: "weft-model".into(),
+                export: "column".into(),
+                args: vec![serde_json::json!(5.2), serde_json::json!(0.44)],
+                material: "marble".into(),
+                recipe: None,
+            },
+            artifact: Artifact {
+                url: format!("/models/{design}.glb"),
+                bytes: 460_860,
+                tris: 2504,
+                sha256: "d0bf8301c4b48aa18a7b48946403ee1f691cc831a2bbe7c169adedd850570495".into(),
+                lods: Vec::new(),
+            },
+            facts: Facts {
+                size: [0.91, 5.2, 0.91],
+                origin: "base".into(),
+                front: "+z".into(),
+                parts: 1,
+                materials: vec!["marble".into()],
+                collider: "cylinder".into(),
+                sockets: vec![Socket { name: "cap".into(), at: [0.0, 5.2, 0.0], kind: "capital".into(), size: [0.9; 3] }],
+            },
+            preview: format!("/models/{design}.png"),
+            license: "CC0-1.0".into(),
+            author: "did:pixygon:quarry".into(),
+            origin: "seed".into(),
+            supplier: "chisel".into(),
+            codex: String::new(),
+            concept: String::new(),
+            verdicts: Vec::new(),
+            derived_at: 0,
+        }
+    }
+
+    /// The whole point of rendering here: a crawler, an answer engine or a
+    /// browser with JavaScript off gets the store's CONTENTS. If this ever
+    /// passes only because the JSON blob is in the page, it has failed.
+    #[test]
+    fn a_crawler_gets_the_contents_not_a_div() {
+        let entries = vec![entry("5e41fec7b0ce3898", "Doric column, 5.2 m")];
+        let html = render(&entries, None, false);
+        let markup = html.split("<script type=\"application/json\"").next().unwrap();
+        assert!(markup.contains("Doric column, 5.2 m"), "the title is in the markup");
+        assert!(markup.contains("href=\"/m/5e41fec7b0ce3898\""), "the card is a real link");
+        assert!(markup.contains("0.91 × 5.20 × 0.91 m"), "the measured size is in the markup");
+        assert!(markup.contains("cylinder"), "the collider is in the markup");
+        assert!(markup.contains("2,504"), "the triangle count is in the markup");
+        assert!(markup.contains("column(5.2, 0.44)"), "the recipe is in the markup");
+        assert!(markup.contains("capital"), "the socket kinds are in the markup");
+    }
+
+    /// The head describes the url that was asked for. Pointing every
+    /// canonical at the alphabetically first entry hides the store behind an
+    /// amphora.
+    #[test]
+    fn the_head_describes_the_url_that_was_asked_for() {
+        let entries = vec![entry("aaa1", "Amphora"), entry("bbb2", "Column")];
+        let index = render(&entries, None, false);
+        assert!(index.contains("<link rel=\"canonical\" href=\"https://quarry.pixygon.io/\">"));
+        assert!(index.contains("<title>The Quarry — the Thread&#39;s model store</title>"));
+
+        let one = render(&entries, entries.get(1), false);
+        assert!(one.contains("<link rel=\"canonical\" href=\"https://quarry.pixygon.io/m/bbb2\">"));
+        assert!(one.contains("<title>Column — The Quarry</title>"));
+        assert!(one.contains("og:image\" content=\"https://quarry.pixygon.io/models/bbb2.png"));
+    }
+
+    /// A title is words a publisher sent. They are escaped everywhere, and
+    /// the entries blob cannot close the script tag it lives in.
+    #[test]
+    fn a_publishers_words_cannot_break_out() {
+        let mut e = entry("c0ffee", "</script><img src=x onerror=alert(1)>");
+        e.description = "\"quoted\" & <angled>".into();
+        let html = render(&[e], None, false);
+        let markup = html.split("<script type=\"application/json\"").next().unwrap();
+        assert!(!markup.contains("<img src=x"), "unescaped markup reached the page");
+        assert!(!html.contains("</script><img"), "the json blob closed its own tag");
+        // Nothing HTML reacts to survives inside a script element, and the
+        // blob is still valid JSON: the parser undoes \u003c for us.
+        for id in ["application/ld+json\">", "application/json\" id=\"models\">"] {
+            let blob = html.split(id).nth(1).unwrap().split("</script>").next().unwrap();
+            assert!(!blob.contains('<'), "a raw < survived inside a script element");
+        }
+        let blob = html
+            .split("<script type=\"application/json\" id=\"models\">")
+            .nth(1)
+            .unwrap()
+            .split("</script>")
+            .next()
+            .unwrap();
+        let back: Vec<Entry> = serde_json::from_str(blob).expect("the blob round-trips");
+        assert_eq!(back[0].title, "</script><img src=x onerror=alert(1)>");
+    }
+
+    /// Verdicts are rendered for a reader, not only for the script.
+    #[test]
+    fn a_verdict_is_on_the_page() {
+        let mut e = entry("d00d", "Column");
+        e.verdicts.push(Verdict { verdict: "no".into(), note: "too slender".into(), by: String::new(), at: 1 });
+        let html = render(&[e.clone()], Some(&e), false);
+        assert!(html.contains("not it"));
+        assert!(html.contains("too slender"));
+    }
+
+    /// Cache-busting has to actually change when the asset does.
+    #[test]
+    fn the_asset_version_is_eight_hex_digits() {
+        let v = version();
+        assert_eq!(v.len(), 8, "{v}");
+        assert!(v.chars().all(|c| c.is_ascii_hexdigit()), "{v}");
+    }
+
+    #[test]
+    fn an_empty_shelf_says_so() {
+        let html = render(&[], None, false);
+        assert!(html.contains("The shelf is empty"));
+        assert!(html.contains("<title>The Quarry"));
+    }
 }

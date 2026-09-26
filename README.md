@@ -93,7 +93,13 @@ library, so the store is never empty on arrival.
 
 Vendored crates are synced from the engine repo with `scripts/sync-vendor.sh`.
 
-**Deploying.** A push does not redeploy: trigger Coolify by uuid. And until a
+**Shipping.** The Quarry is a pearl of the crate type: `pearl ship` is the
+last step (cargo test → changelog → the released version into `Cargo.toml` →
+release on the API → commit and push). Publishing to crates.io is a separate
+human step.
+
+**Deploying.** Shipping is not deploying: a push does not redeploy, so
+trigger Coolify by uuid. And until a
 persistent volume is mounted at `/data`, **every redeploy wipes the store** —
 the carved starters reseed themselves, the grown ones do not, so run
 `scripts/republish-groves.sh` (with `QUARRY_TOKEN` in the environment) after

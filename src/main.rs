@@ -518,3 +518,58 @@ async fn respond(
     }
     stream.flush().await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Quarry mints every filename it serves — a design id is hex and
+    /// nothing else. That is the whole defence against `..`, and it is worth
+    /// a test because the next person to add a route will copy this one.
+    #[test]
+    fn only_a_design_can_name_a_file() {
+        assert!(is_design("5272b8f10550f094"));
+        assert!(!is_design(""));
+        assert!(!is_design(".."));
+        assert!(!is_design("../../etc/passwd"));
+        assert!(!is_design("5272b8f10550f094 "));
+        assert!(!is_design(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn an_artifact_name_is_a_design_and_an_extension() {
+        assert_eq!(
+            split_artifact("5272b8f10550f094.glb"),
+            Some(("5272b8f10550f094".into(), "glb".into()))
+        );
+        // the LOD spelling the grower writes
+        assert_eq!(
+            split_artifact("5272b8f10550f094.lod2.glb"),
+            Some(("5272b8f10550f094".into(), "glb".into()))
+        );
+        // bare = the entry
+        assert_eq!(
+            split_artifact("5272b8f10550f094"),
+            Some(("5272b8f10550f094".into(), "json".into()))
+        );
+        for bad in ["../../etc/passwd", "..%2f..%2fetc", "", ".", "a/b.glb", "5272b8f1.gl/b"] {
+            assert_eq!(split_artifact(bad), None, "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_submission_must_be_json() {
+        assert!(parse_submission(b"not json").is_err());
+        assert!(parse_submission(&[0xff, 0xfe]).is_err());
+        let ok = parse_submission(br#"{"title":"x","export":"column","args":[1,2]}"#).unwrap();
+        assert_eq!(ok.title, "x");
+        assert_eq!(ok.package, "weft-model", "the default package is the library");
+    }
+
+    #[test]
+    fn only_the_artifacts_are_immutable() {
+        assert!(Cache::Immutable.header().contains("immutable"));
+        assert_eq!(Cache::None.header(), "no-cache");
+        assert!(!Cache::Short.header().contains("immutable"));
+    }
+}

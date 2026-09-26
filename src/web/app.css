@@ -116,6 +116,9 @@ dialog.maker::backdrop{background:rgba(6,7,9,.72)}
   .bar{padding:10px 16px}
   .bar h2{font-size:19px}
   .cards{overflow:visible}
+  /* Caption and hint share a line at 390 px and collide; on a touch screen
+     "drag to turn" is telling someone what they already did. */
+  .pane .hint{display:none}
   .pane,.stage{min-height:340px}
   .stage.split{grid-template-columns:1fr}
   .verdict{grid-template-columns:1fr}

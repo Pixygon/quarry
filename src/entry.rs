@@ -270,14 +270,21 @@ fn design_id(sub: &Submission) -> String {
     sha256_hex(canonical.to_string().as_bytes())[..16].to_string()
 }
 
-/// A grow recipe with every default filled in, so two spellings of the same
-/// tree (one terse, one exhaustive) are one design.
+/// A grow recipe reduced to what it actually says: parsed, then every field
+/// equal to the grower's default dropped. Two spellings of one tree (terse,
+/// exhaustive) are one design — and a new recipe field with a default does
+/// not fork every existing design (the 2026-09-26 `leaves` lesson).
 fn canonical_recipe(sub: &Submission) -> Option<serde_json::Value> {
     if sub.package != "grove" {
         return None;
     }
     let r: grove::GrowRecipe = serde_json::from_value(sub.recipe.clone()?).ok()?;
-    serde_json::to_value(r).ok()
+    let mut full = serde_json::to_value(r).ok()?;
+    let defaults = serde_json::to_value(grove::GrowRecipe::default()).ok()?;
+    if let (Some(obj), Some(def)) = (full.as_object_mut(), defaults.as_object()) {
+        obj.retain(|k, v| def.get(k) != Some(v));
+    }
+    Some(full)
 }
 
 /// Float noise must not fork a design: 5.200000001 and 5.2 are one thing.

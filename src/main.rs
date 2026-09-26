@@ -10,8 +10,16 @@
 //! That also makes every model **re-derivable**. The CDN is an optimisation,
 //! not a dependency: lose the Quarry and every world rebuilds from recipes.
 //!
+//! It is also the **viewing room**: the one page the models are opened,
+//! turned, judged and made in. That page is rendered here, by the binary
+//! that owns the models, so a crawler and an answer engine get the store's
+//! actual contents rather than an empty div (see [`page`]).
+//!
 //! Routes (HTTP/1.1, TLS at the proxy):
-//!   GET  /                          → index: motto, counts, kinds
+//!   GET  /                          → the viewing room (HTML), or the
+//!        index JSON for anything that did not ask for HTML
+//!   GET  /index.json                → index: motto, counts, kinds
+//!   GET  /m/<design>                → the viewing room, opened on one model
 //!   GET  /healthz                   → 200 ok
 //!   GET  /models                    → every entry (facts included)
 //!   GET  /models/search?kind=&h=&w=&d=&tol=&style=&tags=&limit=
@@ -19,9 +27,20 @@
 //!   GET  /models/<design>.json      → one entry
 //!   GET  /models/<design>.glb       → the artifact
 //!   GET  /models/<design>.png       → the preview sheet
-//!   POST /publish                   → body = a submission (recipe + words);
-//!        derived, then stored. If QUARRY_TOKEN is set, requires
-//!        `authorization: Bearer <token>`.
+//!   GET  /library                   → what the Make door may offer: the
+//!        weft-model shapes with the arity the library itself declares, its
+//!        materials, and the grower's blank recipe
+//!   POST /publish                   → a submission (recipe + words):
+//!        derived, then stored
+//!   POST /derive                    → the same, kept off the shelf: a look
+//!        before you publish. The artifact lands in a swept scratch drawer
+//!        and is served from /derived/<design>.glb
+//!   POST /models/<design>/verdict   → {verdict, note} → kept on the entry
+//!   POST /models/<design>/concept   → {codex, concept} → kept on the entry
+//!
+//! Every POST is gated by `authorization: Bearer <QUARRY_TOKEN>` when that
+//! variable is set: they all either cost the store real work or write to an
+//! entry.
 //!
 //! Env: PORT (default 3000), QUARRY_DATA (default ./data), QUARRY_TOKEN.
 //! An empty shelf seeds itself from the built-in `weft-model` library, so
@@ -33,13 +52,22 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 
 mod entry;
+mod library;
+mod page;
 use entry::{derive, Submission};
 
 struct App {
     data: PathBuf,
+    /// Derived-to-be-looked-at, never shelved. Swept as it fills.
+    scratch: PathBuf,
     token: Option<String>,
+    /// Carving and growing are CPU work, and the store has one machine. Two
+    /// at a time keeps a browser responsive without letting a stampede of
+    /// derives take the whole box down.
+    kiln: Semaphore,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -48,13 +76,22 @@ async fn main() {
     let data = PathBuf::from(std::env::var("QUARRY_DATA").unwrap_or_else(|_| "data".into()));
     std::fs::create_dir_all(&data).expect("data dir");
 
-    if std::fs::read_dir(&data).map(|mut d| d.next().is_none()).unwrap_or(true) {
+    // "Empty" means no entries — not "no files". A scratch drawer left over
+    // from the last run is not stock.
+    let shelved = std::fs::read_dir(&data)
+        .map(|d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".json")).count())
+        .unwrap_or(0);
+    if shelved == 0 {
         seed(&data);
     }
 
+    let scratch = data.join(".derived");
+    let _ = std::fs::create_dir_all(&scratch);
     let app = Arc::new(App {
         data,
+        scratch,
         token: std::env::var("QUARRY_TOKEN").ok().filter(|t| !t.is_empty()),
+        kiln: Semaphore::new(2),
     });
     let listener = TcpListener::bind(("0.0.0.0", port)).await.expect("bind");
     println!("quarry listening on :{port} — the stone is cut");
@@ -102,6 +139,8 @@ fn seed(data: &PathBuf) {
             author: "did:pixygon:quarry".into(),
             origin: "seed".into(),
             sockets: Vec::new(),
+            codex: String::new(),
+            concept: String::new(),
         };
         match derive(&sub, data) {
             Ok(e) => println!("seeded {} ({})", e.design, e.title),
@@ -125,7 +164,7 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
             break;
         }
         if buf.len() > 64 * 1024 {
-            return respond(&mut stream, 431, "text/plain", b"head too large").await;
+            return respond(&mut stream, false, 431, "text/plain", Cache::None, b"head too large").await;
         }
     }
     let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
@@ -142,9 +181,74 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
             .map(|l| l[name.len() + 1..].trim().to_string())
     };
 
+    // A HEAD is a GET that stops at the headers — same route, same headers,
+    // no body. Routing it separately answered 404 to every crawler that
+    // asked politely whether a model was there.
+    let head_only = method == "HEAD";
+    let method = if head_only { "GET" } else { method };
+
+    let wants_html = header("accept").is_some_and(|a| a.contains("text/html"));
+    let authorised = || -> bool {
+        match &app.token {
+            None => true,
+            Some(tok) => header("authorization")
+                .is_some_and(|a| a.strip_prefix("Bearer ") == Some(tok.as_str())),
+        }
+    };
+
+    // Any POST carries a body; read it once, here, rather than in four places.
+    let body: Vec<u8> = if method == "POST" {
+        let want: usize = header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+        if want == 0 || want > 8 * 1024 * 1024 {
+            return respond(&mut stream, head_only, 413, "text/plain", Cache::None, b"bad content-length (max 8MB)").await;
+        }
+        let mut b = buf[head_end..].to_vec();
+        while b.len() < want {
+            let n = stream.read(&mut tmp).await?;
+            if n == 0 {
+                break;
+            }
+            b.extend_from_slice(&tmp[..n]);
+        }
+        b
+    } else {
+        Vec::new()
+    };
+
     match (method, path.as_str()) {
-        ("GET", "/healthz") => respond(&mut stream, 200, "text/plain", b"ok").await,
-        ("GET", "/") => {
+        ("GET", "/healthz") => respond(&mut stream, head_only, 200, "text/plain", Cache::None, b"ok").await,
+        ("OPTIONS", _) => respond(&mut stream, head_only, 204, "text/plain", Cache::None, b"").await,
+        ("GET", "/app.css") => {
+            respond(&mut stream, head_only, 200, "text/css; charset=utf-8", Cache::Immutable, page::css().as_bytes()).await
+        }
+        ("GET", "/app.js") => {
+            respond(&mut stream, head_only, 200, "text/javascript; charset=utf-8", Cache::Immutable, page::js().as_bytes()).await
+        }
+        ("GET", "/library") => {
+            let body = library::catalog().to_string();
+            respond(&mut stream, head_only, 200, "application/json", Cache::Short, body.as_bytes()).await
+        }
+        ("GET", "/robots.txt") => {
+            let body = "User-agent: *\nAllow: /\nSitemap: https://quarry.pixygon.io/sitemap.xml\n";
+            respond(&mut stream, head_only, 200, "text/plain", Cache::Short, body.as_bytes()).await
+        }
+        ("GET", "/sitemap.xml") => {
+            let mut x = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n<url><loc>https://quarry.pixygon.io/</loc></url>\n");
+            for e in load_all(&app.data) {
+                x.push_str(&format!("<url><loc>https://quarry.pixygon.io/m/{}</loc></url>\n", e.design));
+            }
+            x.push_str("</urlset>\n");
+            respond(&mut stream, head_only, 200, "application/xml", Cache::Short, x.as_bytes()).await
+        }
+        // The front door answers in the visitor's language: a browser or a
+        // crawler asked for HTML and gets the viewing room; everything else
+        // — the CLI, a layout engine — gets the index it has always got.
+        ("GET", "/") if wants_html => {
+            let entries = load_all(&app.data);
+            let html = page::render(&entries, None, app.token.is_some());
+            respond(&mut stream, head_only, 200, "text/html; charset=utf-8", Cache::None, html.as_bytes()).await
+        }
+        ("GET", "/") | ("GET", "/index.json") => {
             let entries = load_all(&app.data);
             let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
             for e in &entries {
@@ -156,87 +260,154 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
                 "spec": "https://github.com/Pixygon/Infinite/blob/main/docs/spec/model-v0.1.md",
                 "models": entries.len(),
                 "kinds": kinds,
-                "routes": ["/models", "/models/search?kind=…&h=…&tol=…", "/models/<design>.glb", "/publish"],
+                "routes": ["/models", "/models/search?kind=…&h=…&tol=…", "/models/<design>.glb", "/publish", "/derive", "/library"],
             });
-            respond(&mut stream, 200, "application/json", body.to_string().as_bytes()).await
+            respond(&mut stream, head_only, 200, "application/json", Cache::None, body.to_string().as_bytes()).await
+        }
+        ("GET", p) if p.starts_with("/m/") => {
+            let id = &p["/m/".len()..];
+            let entries = load_all(&app.data);
+            let cur = entries.iter().find(|e| e.design == id);
+            if cur.is_none() {
+                let html = page::render(&entries, None, app.token.is_some());
+                return respond(&mut stream, head_only, 404, "text/html; charset=utf-8", Cache::None, html.as_bytes()).await;
+            }
+            let html = page::render(&entries, cur, app.token.is_some());
+            respond(&mut stream, head_only, 200, "text/html; charset=utf-8", Cache::None, html.as_bytes()).await
         }
         ("GET", "/models") => {
             let entries = load_all(&app.data);
             let body = serde_json::json!({ "count": entries.len(), "models": entries });
-            respond(&mut stream, 200, "application/json", body.to_string().as_bytes()).await
+            respond(&mut stream, head_only, 200, "application/json", Cache::None, body.to_string().as_bytes()).await
         }
         ("GET", "/models/search") => {
             let q = parse_query(&query);
             let hits = entry::search(&load_all(&app.data), &q);
             let body = serde_json::json!({ "query": q, "count": hits.len(), "models": hits });
-            respond(&mut stream, 200, "application/json", body.to_string().as_bytes()).await
+            respond(&mut stream, head_only, 200, "application/json", Cache::None, body.to_string().as_bytes()).await
         }
-        ("GET", p) if p.starts_with("/models/") => {
-            let name = &p["/models/".len()..];
-            let (id, ext) = match name.rsplit_once('.') {
-                Some((i, e)) => (i, e),
-                None => (name, "json"),
+        ("GET", p) if p.starts_with("/models/") || p.starts_with("/derived/") => {
+            let scratch = p.starts_with("/derived/");
+            let dir = if scratch { &app.scratch } else { &app.data };
+            let name = p.split_once('/').and_then(|(_, r)| r.split_once('/')).map(|(_, n)| n).unwrap_or("");
+            let Some((id, ext)) = split_artifact(name) else {
+                return respond(&mut stream, head_only, 400, "text/plain", Cache::None, b"bad design id").await;
             };
-            if !id.chars().all(|c| c.is_ascii_hexdigit()) || id.is_empty() {
-                return respond(&mut stream, 400, "text/plain", b"bad design id").await;
-            }
-            let (file, ctype) = match ext {
-                "glb" => (format!("{id}.glb"), "model/gltf-binary"),
-                "png" => (format!("{id}.png"), "image/png"),
-                _ => (format!("{id}.json"), "application/json"),
+            let (file, ctype, cache) = match ext.as_str() {
+                "glb" => (name.to_string(), "model/gltf-binary", Cache::Immutable),
+                "png" => (name.to_string(), "image/png", Cache::Immutable),
+                _ => (format!("{id}.json"), "application/json", Cache::None),
             };
-            match std::fs::read(app.data.join(&file)) {
-                Ok(bytes) => respond(&mut stream, 200, ctype, &bytes).await,
-                Err(_) => respond(&mut stream, 404, "text/plain", b"no such model").await,
+            match std::fs::read(dir.join(&file)) {
+                Ok(bytes) => respond(&mut stream, head_only, 200, ctype, cache, &bytes).await,
+                Err(_) => respond(&mut stream, head_only, 404, "text/plain", Cache::None, b"no such model").await,
             }
         }
-        ("POST", "/publish") => {
-            if let Some(tok) = &app.token {
-                let ok = header("authorization")
-                    .is_some_and(|a| a.strip_prefix("Bearer ") == Some(tok.as_str()));
-                if !ok {
-                    return respond(&mut stream, 401, "text/plain", b"bad token").await;
-                }
+        ("POST", "/publish") | ("POST", "/derive") => {
+            if !authorised() {
+                return respond(&mut stream, head_only, 401, "text/plain", Cache::None, b"bad token").await;
             }
-            let want: usize = header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
-            if want == 0 || want > 8 * 1024 * 1024 {
-                return respond(&mut stream, 413, "text/plain", b"bad content-length (max 8MB)")
-                    .await;
-            }
-            let mut body = buf[head_end..].to_vec();
-            while body.len() < want {
-                let n = stream.read(&mut tmp).await?;
-                if n == 0 {
-                    break;
-                }
-                body.extend_from_slice(&tmp[..n]);
-            }
-            let Ok(text) = String::from_utf8(body) else {
-                return respond(&mut stream, 400, "text/plain", b"not utf-8").await;
-            };
-            let sub: Submission = match serde_json::from_str(&text) {
+            let sub = match parse_submission(&body) {
                 Ok(s) => s,
-                Err(e) => {
-                    let msg = format!("not a submission: {e}");
-                    return respond(&mut stream, 400, "text/plain", msg.as_bytes()).await;
-                }
+                Err(msg) => return respond(&mut stream, head_only, 400, "text/plain", Cache::None, msg.as_bytes()).await,
             };
-            // The gate: the Quarry MAKES the artifact. Nothing is taken on
-            // faith because nothing is taken at all.
-            match derive(&sub, &app.data) {
+            let shelve = path == "/publish";
+            let dir = if shelve { app.data.clone() } else { app.scratch.clone() };
+            // Carving and growing block; keep them off the runtime's threads.
+            let _permit = app.kiln.acquire().await;
+            let made = tokio::task::spawn_blocking(move || {
+                if shelve { derive(&sub, &dir) } else { entry::derive_scratch(&sub, &dir) }
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("the kiln died: {e}")));
+            match made {
                 Ok(e) => {
-                    println!("published {} — {} ({} tris)", e.design, e.title, e.artifact.tris);
+                    let what = if shelve { "published" } else { "derived (not shelved)" };
+                    println!("{what} {} — {} ({} tris)", e.design, e.title, e.artifact.tris);
                     let body = serde_json::to_string(&e).unwrap_or_default();
-                    respond(&mut stream, 200, "application/json", body.as_bytes()).await
+                    respond(&mut stream, head_only, 200, "application/json", Cache::None, body.as_bytes()).await
                 }
                 Err(err) => {
                     let msg = format!("REFUSED: {err}");
-                    respond(&mut stream, 422, "text/plain", msg.as_bytes()).await
+                    respond(&mut stream, head_only, 422, "text/plain", Cache::None, msg.as_bytes()).await
                 }
             }
         }
-        _ => respond(&mut stream, 405, "text/plain", b"method not allowed").await,
+        ("POST", p) if p.starts_with("/models/") => {
+            if !authorised() {
+                return respond(&mut stream, head_only, 401, "text/plain", Cache::None, b"bad token").await;
+            }
+            let rest = &p["/models/".len()..];
+            let Some((id, what)) = rest.split_once('/') else {
+                return respond(&mut stream, head_only, 404, "text/plain", Cache::None, b"no such route").await;
+            };
+            if !is_design(id) {
+                return respond(&mut stream, head_only, 400, "text/plain", Cache::None, b"bad design id").await;
+            }
+            let file = app.data.join(format!("{id}.json"));
+            let Ok(text) = std::fs::read_to_string(&file) else {
+                return respond(&mut stream, head_only, 404, "text/plain", Cache::None, b"no such model").await;
+            };
+            let Ok(mut e) = serde_json::from_str::<entry::Entry>(&text) else {
+                return respond(&mut stream, head_only, 500, "text/plain", Cache::None, b"the entry on disk is unreadable").await;
+            };
+            let patch: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+            let field = |k: &str| patch.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            match what {
+                // A verdict is a judgement about the design, so it lives with
+                // the design — not in the browser that happened to make it.
+                "verdict" => {
+                    let verdict = field("verdict");
+                    if !matches!(verdict.as_str(), "yes" | "close" | "no") {
+                        return respond(&mut stream, head_only, 400, "text/plain", Cache::None,
+                            b"a verdict is 'yes', 'close' or 'no'").await;
+                    }
+                    let mut note = field("note");
+                    note.truncate(400);
+                    e.verdicts.push(entry::Verdict { verdict, note, by: field("by"), at: entry::now() });
+                    if e.verdicts.len() > 50 {
+                        let cut = e.verdicts.len() - 50;
+                        e.verdicts.drain(..cut);
+                    }
+                }
+                "concept" => {
+                    e.codex = field("codex");
+                    e.concept = field("concept");
+                    if !e.concept.is_empty() && !e.concept.starts_with("https://") {
+                        return respond(&mut stream, head_only, 400, "text/plain", Cache::None,
+                            b"a concept is an https url").await;
+                    }
+                }
+                _ => return respond(&mut stream, head_only, 404, "text/plain", Cache::None, b"no such route").await,
+            }
+            let json = serde_json::to_string_pretty(&e).unwrap_or_default();
+            if std::fs::write(&file, &json).is_err() {
+                return respond(&mut stream, head_only, 500, "text/plain", Cache::None, b"cannot write the entry").await;
+            }
+            respond(&mut stream, head_only, 200, "application/json", Cache::None, json.as_bytes()).await
+        }
+        ("GET", _) => respond(&mut stream, head_only, 404, "text/plain", Cache::None, b"no such route").await,
+        _ => respond(&mut stream, head_only, 405, "text/plain", Cache::None, b"method not allowed").await,
     }
+}
+
+/// `<design>.<ext>`, where the design is the hex the Quarry itself minted —
+/// nothing else may name a file, which is what keeps `..` out of the path.
+fn split_artifact(name: &str) -> Option<(String, String)> {
+    let (id, ext) = name.split_once('.').unwrap_or((name, "json"));
+    if !is_design(id) || !ext.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
+        return None;
+    }
+    Some((id.to_string(), ext.rsplit('.').next().unwrap_or("").to_string()))
+}
+
+fn is_design(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn parse_submission(body: &[u8]) -> Result<Submission, String> {
+    let text = std::str::from_utf8(body).map_err(|_| "not utf-8".to_string())?;
+    serde_json::from_str(text).map_err(|e| format!("not a submission: {e}"))
 }
 
 fn load_all(data: &PathBuf) -> Vec<entry::Entry> {
@@ -293,14 +464,39 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+/// How long a thing may be believed. The artifacts are content-addressed —
+/// their name IS their hash, so they can be cached forever — and nothing
+/// else can be: an entry gains verdicts, the shelf gains models, and a page
+/// that went stale would be lying about a store whose whole claim is that
+/// it does not.
+#[derive(Clone, Copy)]
+enum Cache {
+    Immutable,
+    Short,
+    None,
+}
+
+impl Cache {
+    fn header(self) -> &'static str {
+        match self {
+            Cache::Immutable => "public, max-age=31536000, immutable",
+            Cache::Short => "public, max-age=300",
+            Cache::None => "no-cache",
+        }
+    }
+}
+
 async fn respond(
     stream: &mut TcpStream,
+    head_only: bool,
     status: u16,
     ctype: &str,
+    cache: Cache,
     body: &[u8],
 ) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
+        204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
         404 => "Not Found",
@@ -308,13 +504,17 @@ async fn respond(
         413 => "Payload Too Large",
         422 => "Unprocessable Entity",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
         _ => "",
     };
     let head = format!(
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: {ctype}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\ncache-control: public, max-age=31536000, immutable\r\nconnection: close\r\n\r\n",
-        body.len()
+        "HTTP/1.1 {status} {reason}\r\ncontent-type: {ctype}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\naccess-control-allow-headers: authorization, content-type\r\naccess-control-allow-methods: GET, POST, OPTIONS\r\ncache-control: {}\r\nconnection: close\r\n\r\n",
+        body.len(),
+        cache.header()
     );
     stream.write_all(head.as_bytes()).await?;
-    stream.write_all(body).await?;
+    if !head_only {
+        stream.write_all(body).await?;
+    }
     stream.flush().await
 }

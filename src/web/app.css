@@ -1,0 +1,135 @@
+:root{--void:#0e0f12;--panel:#141416;--surface:#23262f;--edge:#353945;--star:#fcfcfd;--ink:#d7dae2;--mute:#8f96a6;--cyan:#00ffff;--chisel:#d4b483;--grove:#9ad66e;--avatar:#cc333d;--display:"Fraunces",Georgia,"Times New Roman",serif;--body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--void);color:var(--ink);font:14px/1.5 var(--body);min-height:100vh}
+a{color:inherit}button{font:inherit;color:inherit;background:none;border:1px solid var(--edge);border-radius:4px;padding:5px 10px;cursor:pointer}button:hover{border-color:var(--mute)}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+header{display:flex;align-items:baseline;gap:18px;padding:14px 22px;border-bottom:1px solid var(--edge);background:var(--panel)}
+header h1{font:600 26px/1 var(--display);margin:0;color:var(--star);letter-spacing:.01em}header .motto{color:var(--mute);font-style:italic;font-family:var(--display);font-size:15px}
+header .counts{margin-left:auto;font:12px var(--mono);color:var(--mute);display:flex;gap:16px}header .counts b{color:var(--ink);font-weight:500}
+.mock{position:fixed;right:14px;bottom:12px;font:11px var(--mono);color:var(--void);background:var(--cyan);padding:3px 8px;border-radius:3px;letter-spacing:.08em}
+main{display:grid;grid-template-columns:300px minmax(0,1fr) 340px;min-height:calc(100vh - 57px)}
+@media(max-width:1100px){main{grid-template-columns:260px minmax(0,1fr)}.ledger{grid-column:1/-1;border-left:0;border-top:1px solid var(--edge)}}
+@media(max-width:760px){main{grid-template-columns:1fr}.shelf{border-right:0;border-bottom:1px solid var(--edge)}}
+.shelf{border-right:1px solid var(--edge);background:var(--panel);display:flex;flex-direction:column}
+.shelf .tools{padding:12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--edge)}
+.shelf input{width:100%;background:var(--void);border:1px solid var(--edge);border-radius:4px;color:var(--ink);padding:7px 9px;font:inherit}
+.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{padding:3px 9px;border-radius:99px;font-size:12px;border:1px solid var(--edge);display:inline-flex;gap:6px;align-items:center}.chip[aria-pressed=true]{background:var(--surface);border-color:var(--mute);color:var(--star)}
+.chip i{width:8px;height:8px;border-radius:50%;display:inline-block}.chip .n{font:11px var(--mono);color:var(--mute)}.chip[disabled]{opacity:.45;cursor:not-allowed}
+.cards{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+.card{display:grid;grid-template-columns:64px 1fr;gap:10px;padding:6px;border:1px solid transparent;border-radius:6px;text-align:left;background:none;align-items:center}
+.card:hover{background:var(--surface)}.card[aria-current=true]{background:var(--surface);border-color:var(--edge)}
+.card .thumb{width:64px;height:48px;border-radius:4px;background:#2a2d36;overflow:hidden;position:relative}.card .thumb img{width:192px;height:64px;object-fit:cover;object-position:center;position:absolute;left:-64px;top:-8px}
+.card .t{font:500 14px/1.2 var(--body);color:var(--star);display:flex;gap:6px;align-items:center}.card .m{font:11px var(--mono);color:var(--mute)}
+.sup{width:6px;height:14px;border-radius:2px;flex:none}.sup.chisel{background:var(--chisel)}.sup.grove{background:var(--grove)}.sup.avatar{background:var(--avatar)}
+.table{display:flex;flex-direction:column;min-width:0}
+.bar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--edge);flex-wrap:wrap}
+.bar h2{font:600 22px/1.1 var(--display);margin:0;color:var(--star)}.bar .kind{font:12px var(--mono);color:var(--mute)}
+.seg{display:inline-flex;border:1px solid var(--edge);border-radius:4px;overflow:hidden}.seg button{border:0;border-radius:0;border-right:1px solid var(--edge)}.seg button:last-child{border-right:0}.seg button[aria-pressed=true]{background:var(--surface);color:var(--star)}
+.bar .right{margin-left:auto;display:flex;gap:8px}
+.stage{flex:1;display:grid;grid-template-columns:1fr;gap:1px;background:var(--edge);min-height:420px}.stage.split{grid-template-columns:1fr 1fr}
+.pane{background:radial-gradient(ellipse at 50% 40%,#2c2f38 0%,#1a1c22 55%,#121317 100%);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;min-height:420px}
+.pane img{max-width:100%;max-height:100%;object-fit:contain}.pane .cap{position:absolute;left:14px;bottom:10px;font:11px var(--mono);color:var(--mute);letter-spacing:.06em;text-transform:uppercase}
+.pane .empty{color:var(--mute);font-family:var(--display);font-style:italic;font-size:16px;text-align:center;padding:30px;max-width:34ch}
+.foot{display:flex;gap:18px;padding:8px 16px;border-top:1px solid var(--edge);font:12px var(--mono);color:var(--mute);flex-wrap:wrap}.foot b{color:var(--ink);font-weight:500}
+.ledger{border-left:1px solid var(--edge);background:var(--panel);overflow:auto;padding:0 0 30px}
+.ledger section{padding:12px 16px;border-bottom:1px solid var(--edge)}.ledger h3{margin:0 0 8px;font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:13px}dt{color:var(--mute)}dd{margin:0;font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink)}
+pre{margin:0;font:11.5px/1.45 var(--mono);background:var(--void);border:1px solid var(--edge);border-radius:4px;padding:8px;overflow:auto;max-height:220px;color:#b9c0cf}
+details summary{cursor:pointer;color:var(--mute);font-size:12px;margin-bottom:6px}
+.verdict{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px}.verdict button{padding:8px 4px;font-size:12px}.verdict button[aria-pressed=true]{border-color:var(--cyan);color:var(--cyan)}
+textarea{width:100%;min-height:64px;background:var(--void);border:1px solid var(--edge);border-radius:4px;color:var(--ink);padding:7px 9px;font:13px var(--body);resize:vertical}
+.actions{display:flex;flex-wrap:wrap;gap:6px}.actions .primary{border-color:var(--cyan);color:var(--cyan)}
+.actions a{font:inherit;color:inherit;text-decoration:none;border:1px solid var(--edge);border-radius:4px;padding:5px 10px;cursor:pointer;display:inline-block}
+.actions a:hover{border-color:var(--mute)}
+.id{font:12px var(--mono);color:var(--mute);word-break:break-all}
+
+/* ── the real build: what a live viewing room needs that a mock did not ──── */
+a.card{text-decoration:none;color:inherit}
+.card .t{min-width:0}.card .t span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header .lede{position:absolute;left:-9999px}
+header .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+header .counts{margin-left:0}
+.key{font:11px var(--mono);color:var(--mute);display:inline-flex;align-items:center;gap:6px}
+.key b{color:var(--grove);font-weight:500}.key.locked b{color:var(--mute)}
+.make{border-color:var(--cyan);color:var(--cyan)}
+
+/* The stage: a real canvas, with the turntable underneath it until the glb
+   lands — an empty black box is not a preview. */
+.pane canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.pane .still{position:absolute;inset:0;margin:auto;transition:opacity .25s}
+.pane.live .still{opacity:0;pointer-events:none}
+.pane .load{position:absolute;top:10px;left:14px;font:11px var(--mono);color:var(--mute);letter-spacing:.06em;text-transform:uppercase}
+.pane .load.err{color:var(--avatar);text-transform:none;letter-spacing:0;max-width:40ch}
+.pane .hint{position:absolute;right:14px;bottom:10px;font:11px var(--mono);color:var(--mute);opacity:.6}
+.stage.split .pane .hint{display:none}
+.cpane .attach{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;padding:8px;background:rgba(14,15,18,.86);border-top:1px solid var(--edge)}
+.cpane .attach input{flex:1;min-width:0;background:var(--void);border:1px solid var(--edge);border-radius:4px;color:var(--ink);padding:5px 8px;font:12px var(--mono)}
+
+.note{font-size:12px;color:var(--mute);margin:6px 0 0}
+.verdict-log{margin:8px 0 0;font:11.5px var(--mono);color:var(--mute);display:flex;flex-direction:column;gap:3px}
+.verdict-log b{font-weight:500}
+.verdict-log .yes b{color:var(--grove)}.verdict-log .close b{color:var(--chisel)}.verdict-log .no b{color:var(--avatar)}
+
+/* The Make door. One dialog, three doors, the table behind it still visible. */
+dialog.maker{width:min(760px,94vw);max-height:88vh;padding:0;border:1px solid var(--edge);border-radius:8px;background:var(--panel);color:var(--ink)}
+dialog.maker::backdrop{background:rgba(6,7,9,.72)}
+.maker .head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--edge)}
+.maker .head h2{margin:0;font:600 20px/1 var(--display);color:var(--star)}
+.maker .head .x{margin-left:auto}
+.doors{display:flex;gap:6px;padding:10px 16px 0}
+.doors button{border-radius:4px 4px 0 0;border-bottom-color:transparent}
+.doors button[aria-pressed=true]{background:var(--surface);color:var(--star);border-color:var(--edge)}
+.doors button i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.door{padding:14px 16px;overflow:auto;max-height:58vh;border-top:1px solid var(--edge)}
+.door[hidden]{display:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font:11px var(--mono);color:var(--mute);letter-spacing:.06em;text-transform:uppercase}
+.field input,.field select{background:var(--void);border:1px solid var(--edge);border-radius:4px;color:var(--ink);padding:6px 8px;font:13px var(--mono)}
+.field input:disabled,.field select:disabled{opacity:.4}
+.door h4{margin:14px 0 6px;font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+.door .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+@media(max-width:700px){.door .two{grid-template-columns:1fr}}
+.door textarea.json{min-height:240px;font:11.5px/1.45 var(--mono)}
+.maker .foot{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--edge)}
+.maker .foot .msg{font:12px var(--mono);color:var(--mute);flex:1;min-width:0}
+.maker .foot .msg.err{color:var(--avatar)}.maker .foot .msg.ok{color:var(--grove)}
+.shapes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.shapes button[aria-pressed=true]{background:var(--surface);border-color:var(--cyan);color:var(--cyan)}
+.soon{padding:26px 10px;text-align:center;color:var(--mute);font-family:var(--display);font-style:italic;font-size:16px;line-height:1.6}
+.soon b{display:block;font-style:normal;font-family:var(--body);color:var(--avatar);font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--surface);border:1px solid var(--edge);border-radius:4px;padding:8px 14px;font:12px var(--mono);color:var(--star);z-index:9;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.toast.err{border-color:var(--avatar);color:var(--avatar)}
+[aria-busy=true]{opacity:.55;pointer-events:none}
+
+/* `.pane{display:flex}` out-specifies the browser's own [hidden] rule, so the
+   concept pane was always a grid row — the stage split top-and-bottom and the
+   model got half the table. Say it once, here. */
+.pane[hidden]{display:none}
+
+/* Phone: the header is the only thing that cannot simply stack, so it wraps
+   and the motto stands down. No horizontal scroll, at any width. */
+@media(max-width:820px){
+  header{flex-wrap:wrap;gap:6px 14px;padding:10px 16px}
+  header h1{font-size:22px}
+  header .motto{display:none}
+  header .right{width:100%;margin-left:0;flex-wrap:wrap;gap:6px}
+  header .counts{gap:12px;flex-wrap:wrap;font-size:11px}
+  .bar{padding:10px 16px}
+  .bar h2{font-size:19px}
+  .cards{overflow:visible}
+  .pane,.stage{min-height:340px}
+  .stage.split{grid-template-columns:1fr}
+  .verdict{grid-template-columns:1fr}
+}
+
+/* A viewing room is a room, not a document: on a desktop the three panes fill
+   the window and each scrolls in its own right, so the model is always on the
+   table and the ledger never pushes it off the top. Below the two-column
+   breakpoint the page goes back to flowing, because stacked panes that each
+   scroll are a trap on a phone. */
+@media(min-width:1101px){
+  body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
+  main{flex:1;min-height:0}
+  .shelf,.table,.ledger{min-height:0}
+  .stage{min-height:0}
+  .pane{min-height:260px}
+}

@@ -52,6 +52,15 @@ pub struct Submission {
     /// Declared attachment points, if the publisher knows them.
     #[serde(default)]
     pub sockets: Vec<Socket>,
+    /// The Codex entity this was made for — the slug, so provenance points
+    /// back at the lore the model is answering to.
+    #[serde(default)]
+    pub codex: String,
+    /// The concept image to judge it against. A URL, because most of the
+    /// Codex is sealed and a browser arrives at the Quarry anonymous: the
+    /// gallery link is public, the entity behind it is not.
+    #[serde(default)]
+    pub concept: String,
 }
 
 fn weft_model() -> String {
@@ -76,6 +85,21 @@ pub struct Socket {
     /// Free size at the socket, if it constrains what fits.
     #[serde(default)]
     pub size: [f32; 3],
+}
+
+/// What a person said when they looked at it next to the concept. Kept as a
+/// list, newest last: a "not it" is a task waiting to be written, and the
+/// history says whether a republish actually fixed it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Verdict {
+    /// `yes` — matches concept · `close` — close, fix noted · `no` — not it.
+    pub verdict: String,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub by: String,
+    /// Unix seconds. The Quarry stamps it; a client cannot claim a time.
+    pub at: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -135,6 +159,36 @@ pub struct Entry {
     pub license: String,
     pub author: String,
     pub origin: String,
+    /// Which system made it: `chisel` (carved), `grove` (grown), `avatar`.
+    /// Derived from the package, stored so nobody has to re-derive it.
+    #[serde(default)]
+    pub supplier: String,
+    #[serde(default)]
+    pub codex: String,
+    #[serde(default)]
+    pub concept: String,
+    /// Judgements, oldest first. Empty until somebody looks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verdicts: Vec<Verdict>,
+    /// When the Quarry last ran this recipe. Unix seconds.
+    #[serde(default)]
+    pub derived_at: u64,
+}
+
+/// Which of the three systems a package comes from.
+pub fn supplier_of(package: &str) -> &'static str {
+    match package {
+        "grove" => "grove",
+        "avatar" => "avatar",
+        _ => "chisel",
+    }
+}
+
+pub fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Run the recipe and store what comes out: the entry, the `.glb`, and a
@@ -142,6 +196,42 @@ pub struct Entry {
 /// recipe twice is idempotent — the shelf never fills with near-duplicates
 /// of the same design.
 pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
+    make(sub, data, "/models", true)
+}
+
+/// Run the recipe and keep nothing on the shelf — the "look before you
+/// publish" door. The artifact still has to exist for a browser to open it,
+/// so it lands in a scratch drawer served at `/derived/…` and swept when it
+/// gets crowded; it is not an entry, it is not searchable, it is a look.
+pub fn derive_scratch(sub: &Submission, scratch: &Path) -> Result<Entry, String> {
+    std::fs::create_dir_all(scratch).map_err(|e| format!("cannot open the scratch drawer: {e}"))?;
+    sweep(scratch, 40);
+    make(sub, scratch, "/derived", false)
+}
+
+/// Keep the scratch drawer from becoming a shelf nobody swept: oldest
+/// designs out first, by the mtime of their `.glb`.
+fn sweep(scratch: &Path, keep: usize) {
+    let mut glbs: Vec<(std::time::SystemTime, std::path::PathBuf)> = std::fs::read_dir(scratch)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".glb"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if glbs.len() <= keep {
+        return;
+    }
+    glbs.sort_by_key(|(t, _)| *t);
+    for (_, path) in glbs.iter().take(glbs.len() - keep) {
+        let _ = std::fs::remove_file(path);
+        for ext in ["png", "json"] {
+            let _ = std::fs::remove_file(path.with_extension(ext));
+        }
+    }
+}
+
+fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, String> {
     if sub.title.trim().is_empty() {
         return Err("a model needs a title".into());
     }
@@ -176,21 +266,34 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
     let glb = chisel::model::export_glb(&built)?;
 
     let design = design_id(sub);
-    std::fs::write(data.join(format!("{design}.glb")), &glb)
+    std::fs::write(dir.join(format!("{design}.glb")), &glb)
         .map_err(|e| format!("cannot store artifact: {e}"))?;
     let mut lods: Vec<String> = Vec::new();
     for (i, lod_built) in lod_models.iter().enumerate() {
         let lod_glb = chisel::model::export_glb(lod_built)?;
         let file = format!("{design}.lod{}.glb", i + 1);
-        std::fs::write(data.join(&file), &lod_glb).map_err(|e| format!("cannot store lod: {e}"))?;
-        lods.push(format!("/models/{file}"));
+        std::fs::write(dir.join(&file), &lod_glb).map_err(|e| format!("cannot store lod: {e}"))?;
+        lods.push(format!("{url}/{file}"));
     }
     let preview_opts = chisel::preview::PreviewOptions { width: 384, height: 384, views: 3, ..Default::default() };
-    let png_path = data.join(format!("{design}.png"));
+    let png_path = dir.join(format!("{design}.png"));
     let _ = chisel::preview::write_png(&built, preview_opts, &png_path.to_string_lossy());
 
     let (min, max) = built.bounds();
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    // Re-deriving a design must not erase what people said about it. The
+    // recipe is the identity; the verdicts and the concept it answers to
+    // belong to the design, not to this run of the grower.
+    let before: Option<Entry> = shelve
+        .then(|| std::fs::read_to_string(dir.join(format!("{design}.json"))).ok())
+        .flatten()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    let kept = |new: &str, old: fn(&Entry) -> &String| -> String {
+        if !new.is_empty() {
+            return new.to_string();
+        }
+        before.as_ref().map(|e| old(e).clone()).unwrap_or_default()
+    };
     let entry = Entry {
         design: design.clone(),
         title: sub.title.clone(),
@@ -212,7 +315,7 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
             recipe: canonical_recipe(sub),
         },
         artifact: Artifact {
-            url: format!("/models/{design}.glb"),
+            url: format!("{url}/{design}.glb"),
             bytes: glb.len(),
             tris: built.triangles(),
             sha256: sha256_hex(&glb),
@@ -229,14 +332,21 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
             collider: collider_for(size, &sub.kind),
             sockets,
         },
-        preview: format!("/models/{design}.png"),
+        preview: format!("{url}/{design}.png"),
         license: sub.license.clone(),
         author: sub.author.clone(),
         origin: sub.origin.clone(),
+        supplier: supplier_of(&sub.package).to_string(),
+        codex: kept(&sub.codex, |e| &e.codex),
+        concept: kept(&sub.concept, |e| &e.concept),
+        verdicts: before.as_ref().map(|e| e.verdicts.clone()).unwrap_or_default(),
+        derived_at: now(),
     };
-    let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
-    std::fs::write(data.join(format!("{design}.json")), json)
-        .map_err(|e| format!("cannot store entry: {e}"))?;
+    if shelve {
+        let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("{design}.json")), json)
+            .map_err(|e| format!("cannot store entry: {e}"))?;
+    }
     Ok(entry)
 }
 

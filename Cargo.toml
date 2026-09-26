@@ -16,7 +16,7 @@ weft = { package = "weft-lang", path = "vendor/weft" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "fs", "sync"] }
 
 [profile.release]
 opt-level = 2

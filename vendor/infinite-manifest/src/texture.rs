@@ -12,7 +12,9 @@
 use serde::{Deserialize, Serialize};
 
 /// The pattern kinds this spec version knows.
-pub const KINDS: &[&str] = &["fbm", "voronoi", "bricks", "checker", "wood", "veins", "flat"];
+pub const KINDS: &[&str] = &[
+    "fbm", "voronoi", "bricks", "checker", "wood", "veins", "flat",
+];
 
 /// Texture side-length cap — a manifest cannot make a browser bake 4K maps.
 pub const MAX_SIZE: u32 = 512;
@@ -114,7 +116,10 @@ impl TextureRecipe {
 
     pub fn validate(&self) -> Result<(), String> {
         if !KINDS.contains(&self.kind.as_str()) {
-            return Err(format!("unknown texture kind '{}' — one of {KINDS:?}", self.kind));
+            return Err(format!(
+                "unknown texture kind '{}' — one of {KINDS:?}",
+                self.kind
+            ));
         }
         if self.colors.is_empty() {
             return Err("texture needs at least one color".into());
@@ -124,7 +129,10 @@ impl TextureRecipe {
         }
         if let Some(over) = &self.over {
             if over.over.is_some() {
-                return Err("texture layering is one level deep (the overlay cannot itself have `over`)".into());
+                return Err(
+                    "texture layering is one level deep (the overlay cannot itself have `over`)"
+                        .into(),
+                );
             }
             over.validate()?;
         }

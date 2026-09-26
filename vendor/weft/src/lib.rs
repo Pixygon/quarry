@@ -4,7 +4,7 @@
 //! effect-explicit term graph, identified by the hash of its canonical
 //! encoding. What crosses the wire is the same object that gets verified;
 //! execution backends (this crate's reference interpreter first) compile or
-//! interpret it locally. Spec: `docs/spec/weft-v0.1.md`.
+//! interpret it locally. Spec: [weft-v0.1](https://github.com/Pixygon/thread-spec/blob/main/specs/weft-v0.1.md).
 //!
 //! v0.1 scope — deliberately austere:
 //! - **First-order and non-recursive.** Definitions call other definitions by
@@ -29,9 +29,12 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod draft_lib;
+pub mod json;
 pub mod model_lib;
 pub mod pack;
 pub mod project;
+pub mod text;
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -52,9 +55,9 @@ impl Serialize for WeftHash {
 impl<'de> Deserialize<'de> for WeftHash {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let s = String::deserialize(de)?;
-        let hex = s.strip_prefix("weft:").ok_or_else(|| {
-            serde::de::Error::custom("weft hash must start with 'weft:'")
-        })?;
+        let hex = s
+            .strip_prefix("weft:")
+            .ok_or_else(|| serde::de::Error::custom("weft hash must start with 'weft:'"))?;
         if hex.len() != 64 {
             return Err(serde::de::Error::custom("weft hash must be 64 hex chars"));
         }
@@ -243,13 +246,25 @@ pub enum Term {
     /// Bounded map: evaluate `body` (element = Var 0) for each of at most
     /// `cap` elements of `list` — elements beyond the cap are dropped. The
     /// cap is what keeps the fuel bound static: totality never bends.
-    Map { cap: u32, list: Box<Term>, body: Box<Term> },
+    Map {
+        cap: u32,
+        list: Box<Term>,
+        body: Box<Term>,
+    },
     /// Bounded fold: thread an accumulator through at most `cap` elements
     /// (`body` sees acc = Var 1, element = Var 0).
-    Fold { cap: u32, list: Box<Term>, init: Box<Term>, body: Box<Term> },
+    Fold {
+        cap: u32,
+        list: Box<Term>,
+        init: Box<Term>,
+        body: Box<Term>,
+    },
     /// The list `0..min(count, cap)` — the generator's seed. `cap` keeps the
     /// fuel bound static; with Map/Fold it makes rings, grids, and spirals.
-    Iota { cap: u32, count: Box<Term> },
+    Iota {
+        cap: u32,
+        count: Box<Term>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +426,12 @@ fn enc_term(out: &mut Vec<u8>, t: &Term) {
             enc_term(out, list);
             enc_term(out, body);
         }
-        Term::Fold { cap, list, init, body } => {
+        Term::Fold {
+            cap,
+            list,
+            init,
+            body,
+        } => {
             out.push(14);
             enc_u32(out, *cap);
             enc_term(out, list);
@@ -584,7 +604,9 @@ fn callees(t: &Term) -> BTreeSet<WeftHash> {
                 walk(list, out);
                 walk(body, out);
             }
-            Term::Fold { list, init, body, .. } => {
+            Term::Fold {
+                list, init, body, ..
+            } => {
                 walk(list, out);
                 walk(init, out);
                 walk(body, out);
@@ -609,7 +631,10 @@ fn verify_def(
     let mut fuel: u64 = 0;
     let ty = check(&def.body, &mut ctx, &mut used, &mut fuel, done, m)?;
     if ty != def.ret {
-        return Err(WeftError::Type(format!("body is {ty:?}, declared {:?}", def.ret)));
+        return Err(WeftError::Type(format!(
+            "body is {ty:?}, declared {:?}",
+            def.ret
+        )));
     }
     for k in &used {
         if !def.effects.contains(k) {
@@ -636,7 +661,10 @@ fn verify_def(
         }
         fuel += f;
     }
-    Ok(Verified { effects: used, fuel_bound: fuel })
+    Ok(Verified {
+        effects: used,
+        fuel_bound: fuel,
+    })
 }
 
 /// Typecheck one term; accumulate used effects and the static step bound.
@@ -678,8 +706,10 @@ fn check(
             Ok(at)
         }
         Term::Prim(op, args) => {
-            let ats: Result<Vec<Ty>, _> =
-                args.iter().map(|a| check(a, ctx, used, fuel, done, m)).collect();
+            let ats: Result<Vec<Ty>, _> = args
+                .iter()
+                .map(|a| check(a, ctx, used, fuel, done, m))
+                .collect();
             let ats = ats?;
             use PrimOp::*;
             let (want, out): (Vec<Ty>, Ty) = match op {
@@ -700,7 +730,9 @@ fn check(
                 Len => {
                     return match ats.as_slice() {
                         [Ty::List(_)] => Ok(Ty::Int),
-                        other => Err(WeftError::Type(format!("len expects a list, got {other:?}"))),
+                        other => Err(WeftError::Type(format!(
+                            "len expects a list, got {other:?}"
+                        ))),
                     };
                 }
                 // ListCat: List(T) × List(T) → List(T) — same T, no coercion.
@@ -714,7 +746,9 @@ fn check(
                 }
             };
             if ats != want {
-                return Err(WeftError::Type(format!("{op:?} expects {want:?}, got {ats:?}")));
+                return Err(WeftError::Type(format!(
+                    "{op:?} expects {want:?}, got {ats:?}"
+                )));
             }
             Ok(out)
         }
@@ -739,9 +773,7 @@ fn check(
                 match &elem {
                     None => elem = Some(t),
                     Some(e) if *e == t => {}
-                    Some(e) => {
-                        return Err(WeftError::Type(format!("list mixes {e:?} and {t:?}")))
-                    }
+                    Some(e) => return Err(WeftError::Type(format!("list mixes {e:?} and {t:?}"))),
                 }
             }
             Ok(Ty::List(Box::new(elem.unwrap_or(Ty::Action))))
@@ -790,7 +822,12 @@ fn check(
             *fuel = fuel.saturating_add(body_fuel.saturating_mul(*cap as u64) + *cap as u64);
             Ok(Ty::List(Box::new(bt)))
         }
-        Term::Fold { cap, list, init, body } => {
+        Term::Fold {
+            cap,
+            list,
+            init,
+            body,
+        } => {
             let lt = check(list, ctx, used, fuel, done, m)?;
             let Ty::List(elem) = lt else {
                 return Err(WeftError::Type(format!("fold over non-list {lt:?}")));
@@ -804,7 +841,9 @@ fn check(
             ctx.pop();
             let bt = bt?;
             if bt != it {
-                return Err(WeftError::Type(format!("fold body is {bt:?}, acc is {it:?}")));
+                return Err(WeftError::Type(format!(
+                    "fold body is {bt:?}, acc is {it:?}"
+                )));
             }
             *fuel = fuel.saturating_add(body_fuel.saturating_mul(*cap as u64) + *cap as u64);
             Ok(it)
@@ -812,7 +851,9 @@ fn check(
         Term::Iota { cap, count } => {
             let ct = check(count, ctx, used, fuel, done, m)?;
             if ct != Ty::Int {
-                return Err(WeftError::Type(format!("iota count must be Int, got {ct:?}")));
+                return Err(WeftError::Type(format!(
+                    "iota count must be Int, got {ct:?}"
+                )));
             }
             *fuel = fuel.saturating_add(*cap as u64);
             Ok(Ty::List(Box::new(Ty::Int)))
@@ -835,7 +876,10 @@ pub enum Value {
     List(Vec<Value>),
     Rec(BTreeMap<String, Value>),
     /// A constructed effect request — inert data until the host acts on it.
-    Action { kind: EffectKind, fields: BTreeMap<String, Value> },
+    Action {
+        kind: EffectKind,
+        fields: BTreeMap<String, Value>,
+    },
 }
 
 /// Evaluate `entry`-style: call a definition with argument values, metering
@@ -854,7 +898,10 @@ pub fn eval_call(
     max_fuel: u64,
 ) -> Result<Evaluated, WeftError> {
     let mut fuel = max_fuel;
-    let def = m.defs.get(&target).ok_or_else(|| WeftError::UnknownCall(target.to_string()))?;
+    let def = m
+        .defs
+        .get(&target)
+        .ok_or_else(|| WeftError::UnknownCall(target.to_string()))?;
     // Precondition gate.
     if let Some(pre) = &def.pre {
         let mut env = args.clone();
@@ -872,7 +919,10 @@ pub fn eval_call(
             return Err(WeftError::ContractViolated("post"));
         }
     }
-    Ok(Evaluated { value, fuel_spent: max_fuel - fuel })
+    Ok(Evaluated {
+        value,
+        fuel_spent: max_fuel - fuel,
+    })
 }
 
 fn eval(t: &Term, env: &mut Vec<Value>, m: &Module, fuel: &mut u64) -> Result<Value, WeftError> {
@@ -940,7 +990,10 @@ fn eval(t: &Term, env: &mut Vec<Value>, m: &Module, fuel: &mut u64) -> Result<Va
         }
         Term::Call(h, args) => {
             let vals: Result<Vec<Value>, _> = args.iter().map(|a| eval(a, env, m, fuel)).collect();
-            let def = m.defs.get(h).ok_or_else(|| WeftError::UnknownCall(h.to_string()))?;
+            let def = m
+                .defs
+                .get(h)
+                .ok_or_else(|| WeftError::UnknownCall(h.to_string()))?;
             let mut callee_env = vals?;
             eval(&def.body, &mut callee_env, m, fuel)?
         }
@@ -949,10 +1002,15 @@ fn eval(t: &Term, env: &mut Vec<Value>, m: &Module, fuel: &mut u64) -> Result<Va
             for (k, v) in fields {
                 out.insert(k.clone(), eval(v, env, m, fuel)?);
             }
-            Value::Action { kind: *kind, fields: out }
+            Value::Action {
+                kind: *kind,
+                fields: out,
+            }
         }
         Term::Map { cap, list, body } => {
-            let Value::List(items) = eval(list, env, m, fuel)? else { unreachable!("verified") };
+            let Value::List(items) = eval(list, env, m, fuel)? else {
+                unreachable!("verified")
+            };
             let mut out = Vec::new();
             for item in items.into_iter().take(*cap as usize) {
                 env.push(item);
@@ -962,8 +1020,15 @@ fn eval(t: &Term, env: &mut Vec<Value>, m: &Module, fuel: &mut u64) -> Result<Va
             }
             Value::List(out)
         }
-        Term::Fold { cap, list, init, body } => {
-            let Value::List(items) = eval(list, env, m, fuel)? else { unreachable!("verified") };
+        Term::Fold {
+            cap,
+            list,
+            init,
+            body,
+        } => {
+            let Value::List(items) = eval(list, env, m, fuel)? else {
+                unreachable!("verified")
+            };
             let mut acc = eval(init, env, m, fuel)?;
             for item in items.into_iter().take(*cap as usize) {
                 env.push(acc);
@@ -976,7 +1041,9 @@ fn eval(t: &Term, env: &mut Vec<Value>, m: &Module, fuel: &mut u64) -> Result<Va
             acc
         }
         Term::Iota { cap, count } => {
-            let Value::Int(n) = eval(count, env, m, fuel)? else { unreachable!("verified") };
+            let Value::Int(n) = eval(count, env, m, fuel)? else {
+                unreachable!("verified")
+            };
             let n = n.max(0).min(*cap as i64);
             Value::List((0..n).map(Value::Int).collect())
         }
@@ -1003,9 +1070,7 @@ fn prim(op: PrimOp, vals: Vec<Value>) -> Value {
         (ToText, [Int(a)]) => Text(a.to_string()),
         (FAdd, [Fix(a), Fix(b)]) => Fix(a.wrapping_add(*b)),
         (FSub, [Fix(a), Fix(b)]) => Fix(a.wrapping_sub(*b)),
-        (FMul, [Fix(a), Fix(b)]) => {
-            Fix(((*a as i128 * *b as i128) / FIX_SCALE as i128) as i64)
-        }
+        (FMul, [Fix(a), Fix(b)]) => Fix(((*a as i128 * *b as i128) / FIX_SCALE as i128) as i64),
         (FDiv, [Fix(a), Fix(b)]) => Fix(if *b == 0 {
             0
         } else {
@@ -1042,7 +1107,11 @@ fn fix_sin(x: i64) -> i64 {
     if r < 0 {
         r += FIX_TAU;
     }
-    let (r, sign) = if r > FIX_PI { (r - FIX_PI, -1i128) } else { (r, 1i128) };
+    let (r, sign) = if r > FIX_PI {
+        (r - FIX_PI, -1i128)
+    } else {
+        (r, 1i128)
+    };
     let x = r as i128;
     let pi = FIX_PI as i128;
     let scale = FIX_SCALE as i128;

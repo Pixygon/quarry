@@ -45,8 +45,11 @@ pub fn lint(m: &WorldManifest) -> Vec<Finding> {
         .iter()
         .filter_map(|p| p.mesh.shape.as_ref().map(|sh| (p.id.0, sh.bounds())))
         .collect();
-    let boxes: Vec<Aabb> =
-        m.placements.iter().map(|p| Aabb::of(p, shape_bounds.get(&p.prefab.0))).collect();
+    let boxes: Vec<Aabb> = m
+        .placements
+        .iter()
+        .map(|p| Aabb::of(p, shape_bounds.get(&p.prefab.0)))
+        .collect();
     floating_placements(m, &boxes, &mut out);
     spawn_hazards(m, &boxes, &mut out);
     portal_hazards(m, &boxes, &mut out);
@@ -54,7 +57,31 @@ pub fn lint(m: &WorldManifest) -> Vec<Finding> {
     darkness(m, &mut out);
     degenerate_scales(m, &mut out);
     doubled_placements(m, &mut out);
+    presence_claim(m, &mut out);
     out
+}
+
+/// L9 — `presence.mode` claims a tier the addresses don't support. The spec
+/// says the addresses win, so this never breaks a world; it exists because the
+/// disagreement is always a mistake in one of the two, and the author is the
+/// only one who knows which.
+fn presence_claim(m: &WorldManifest, out: &mut Vec<Finding>) {
+    let Some(p) = &m.presence else { return };
+    if p.mode_disagrees() {
+        out.push(Finding {
+            rule: "L9",
+            message: format!(
+                "presence says mode '{}' but names {} — a browser will treat this world as '{}'",
+                p.mode.as_deref().unwrap_or_default(),
+                if p.relay_list().is_empty() {
+                    "no relay".to_string()
+                } else {
+                    format!("{} relay(s)", p.relay_list().len())
+                },
+                p.effective_mode()
+            ),
+        });
+    }
 }
 
 /// Axis-aligned box approximation of a placement (rotation ignored).
@@ -84,18 +111,36 @@ impl Aabb {
                 p.position[2] + bmax[2] * p.scale[2],
             ];
             let [qx, qy, qz, qw] = p.rotation;
-            let upright = qx.abs() < 0.02 && qz.abs() < 0.02 && (qy.abs() < 0.04 || qw.abs() < 0.04);
-            return Aabb { min: lo, max: hi, solid: p.solid.unwrap_or(true), axis_aligned: upright };
+            let upright =
+                qx.abs() < 0.02 && qz.abs() < 0.02 && (qy.abs() < 0.04 || qw.abs() < 0.04);
+            return Aabb {
+                min: lo,
+                max: hi,
+                solid: p.solid.unwrap_or(true),
+                axis_aligned: upright,
+            };
         }
-        let half = [p.scale[0].abs() / 2.0, p.scale[1].abs() / 2.0, p.scale[2].abs() / 2.0];
+        let half = [
+            p.scale[0].abs() / 2.0,
+            p.scale[1].abs() / 2.0,
+            p.scale[2].abs() / 2.0,
+        ];
         // A meaningfully rotated box is NOT its AABB — containment checks on
         // it would cry wolf (a ring's rotated wall segments "swallowing" the
         // veils in their gates). Mark it so point-in-box rules skip it.
         let [qx, qy, qz, qw] = p.rotation;
         let upright = qx.abs() < 0.02 && qz.abs() < 0.02 && (qy.abs() < 0.04 || qw.abs() < 0.04);
         Aabb {
-            min: [p.position[0] - half[0], p.position[1] - half[1], p.position[2] - half[2]],
-            max: [p.position[0] + half[0], p.position[1] + half[1], p.position[2] + half[2]],
+            min: [
+                p.position[0] - half[0],
+                p.position[1] - half[1],
+                p.position[2] - half[2],
+            ],
+            max: [
+                p.position[0] + half[0],
+                p.position[1] + half[1],
+                p.position[2] + half[2],
+            ],
             solid: p.solid.unwrap_or(true),
             axis_aligned: upright,
         }
@@ -238,9 +283,10 @@ fn text_overflow(m: &WorldManifest, out: &mut Vec<Finding>) {
 fn darkness(m: &WorldManifest, out: &mut Vec<Finding>) {
     let has_sky = m.environment.sky.is_some();
     let has_light = m.placements.iter().any(|p| p.light.is_some());
-    let has_emissive = m.prefabs.iter().any(|pf| {
-        pf.material.as_ref().is_some_and(|mat| mat.emissive > 0.0)
-    });
+    let has_emissive = m
+        .prefabs
+        .iter()
+        .any(|pf| pf.material.as_ref().is_some_and(|mat| mat.emissive > 0.0));
     if !has_sky && !has_light && !has_emissive {
         out.push(Finding {
             rule: "L5",

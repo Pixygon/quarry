@@ -31,9 +31,14 @@ pub struct Submission {
     /// its exports, and the arguments.
     #[serde(default = "weft_model")]
     pub package: String,
+    #[serde(default)]
     pub export: String,
     #[serde(default)]
     pub args: Vec<serde_json::Value>,
+    /// For `package: "grove"`: the grow recipe itself (a `GrowRecipe`), the
+    /// whole bill of rules a tree is grown from. The Quarry grows it here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<serde_json::Value>,
     /// Material export to dress a bare part in (empty = the model brings its own).
     #[serde(default)]
     pub material: String,
@@ -80,6 +85,9 @@ pub struct Recipe {
     pub args: Vec<serde_json::Value>,
     #[serde(default)]
     pub material: String,
+    /// The grow recipe for `grove` designs — re-derivable, same as args.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -88,6 +96,9 @@ pub struct Artifact {
     pub bytes: usize,
     pub tris: usize,
     pub sha256: String,
+    /// Coarser LODs, nearest first, when the recipe makes them (grown things do).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lods: Vec<String>,
 }
 
 /// Measured, not claimed.
@@ -134,23 +145,58 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
     if sub.title.trim().is_empty() {
         return Err("a model needs a title".into());
     }
-    if sub.package != "weft-model" {
-        // Third-party suppliers arrive with the package fetched from wpm;
-        // until that lands, the built-in library is the only supplier.
-        return Err(format!(
-            "unknown package '{}' — only 'weft-model' is available in this Quarry yet",
-            sub.package
-        ));
-    }
-    let library = chisel::weft_model::standard_library();
-    let material = (!sub.material.is_empty()).then_some(sub.material.as_str());
-    let model = chisel::weft_model::eval_model_or_part(&library, &sub.export, &sub.args, material)?;
-    let built = chisel::model::build(&model)?;
+    // Two suppliers so far: the built-in Weft modelling library (carved,
+    // inorganic) and Grove (grown: trees and what hangs on them). Third-party
+    // wpm packages come later. Sockets are MEASURED where the recipe yields
+    // them (a grown tree ends in tips); declared ones are kept otherwise.
+    let (built, sockets, lod_meshes): (chisel::model::Built, Vec<Socket>, Vec<chisel::MeshData>) =
+        match sub.package.as_str() {
+            "weft-model" => {
+                let library = chisel::weft_model::standard_library();
+                let material = (!sub.material.is_empty()).then_some(sub.material.as_str());
+                let model = chisel::weft_model::eval_model_or_part(&library, &sub.export, &sub.args, material)?;
+                (chisel::model::build(&model)?, sub.sockets.clone(), Vec::new())
+            }
+            "grove" => {
+                let value = sub.recipe.clone().ok_or("a grove submission carries its grow recipe in `recipe`")?;
+                let recipe: grove::GrowRecipe =
+                    serde_json::from_value(value).map_err(|e| format!("not a grow recipe: {e}"))?;
+                let grown = grove::grow(&recipe)?;
+                let sockets = grown
+                    .sockets
+                    .iter()
+                    .map(|s| Socket { name: s.name.clone(), at: s.position, kind: "tip".into(), size: [s.radius * 2.0; 3] })
+                    .collect();
+                let lods = grown.lods.into_iter().skip(1).collect();
+                (grown.built, sockets, lods)
+            }
+            other => {
+                return Err(format!("unknown package '{other}' — 'weft-model' and 'grove' are available in this Quarry"));
+            }
+        };
     let glb = chisel::model::export_glb(&built)?;
 
     let design = design_id(sub);
     std::fs::write(data.join(format!("{design}.glb")), &glb)
         .map_err(|e| format!("cannot store artifact: {e}"))?;
+    let mut lods: Vec<String> = Vec::new();
+    for (i, mesh) in lod_meshes.into_iter().enumerate() {
+        let Some(part) = built.parts.first() else { break };
+        let lod_built = chisel::model::Built {
+            name: format!("{}-lod{}", built.name, i + 1),
+            parts: vec![chisel::model::BuiltPart {
+                name: part.name.clone(),
+                mesh,
+                baked: part.baked.clone(),
+                color: part.color,
+                emissive: part.emissive,
+            }],
+        };
+        let lod_glb = chisel::model::export_glb(&lod_built)?;
+        let file = format!("{design}.lod{}.glb", i + 1);
+        std::fs::write(data.join(&file), &lod_glb).map_err(|e| format!("cannot store lod: {e}"))?;
+        lods.push(format!("/models/{file}"));
+    }
     let preview_opts = chisel::preview::PreviewOptions { width: 384, height: 384, views: 3, ..Default::default() };
     let png_path = data.join(format!("{design}.png"));
     let _ = chisel::preview::write_png(&built, preview_opts, &png_path.to_string_lossy());
@@ -162,28 +208,38 @@ pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
         title: sub.title.clone(),
         description: sub.description.clone(),
         tags: sub.tags.clone(),
-        kind: if sub.kind.is_empty() { sub.export.clone() } else { sub.kind.clone() },
+        kind: if !sub.kind.is_empty() {
+            sub.kind.clone()
+        } else if sub.package == "grove" {
+            "tree".into()
+        } else {
+            sub.export.clone()
+        },
         style: sub.style.clone(),
         recipe: Recipe {
             package: sub.package.clone(),
             export: sub.export.clone(),
             args: sub.args.clone(),
             material: sub.material.clone(),
+            recipe: canonical_recipe(sub),
         },
         artifact: Artifact {
             url: format!("/models/{design}.glb"),
             bytes: glb.len(),
             tris: built.triangles(),
             sha256: sha256_hex(&glb),
+            lods,
         },
         facts: Facts {
             size,
-            origin: if min[1].abs() < 0.02 { "base".into() } else { "center".into() },
+            // A leaning trunk's base ring dips a few centimetres under y = 0;
+            // it still rests on the ground. Tolerance scales with height.
+            origin: if min[1].abs() < 0.02f32.max(0.01 * size[1]) { "base".into() } else { "center".into() },
             front: "+z".into(),
             parts: built.parts.len(),
             materials: built.parts.iter().map(|p| p.name.clone()).collect(),
             collider: collider_for(size, &sub.kind),
-            sockets: sub.sockets.clone(),
+            sockets,
         },
         preview: format!("/models/{design}.png"),
         license: sub.license.clone(),
@@ -214,13 +270,26 @@ fn collider_for(size: [f32; 3], kind: &str) -> String {
 /// The design id: a hash of the recipe alone. Same recipe → same design, no
 /// matter who published it or what they called it.
 fn design_id(sub: &Submission) -> String {
-    let canonical = serde_json::json!({
+    let mut canonical = serde_json::json!({
         "package": sub.package,
         "export": sub.export,
         "args": sub.args.iter().map(canonical_number).collect::<Vec<_>>(),
         "material": sub.material,
     });
+    if let Some(r) = canonical_recipe(sub) {
+        canonical["recipe"] = r;
+    }
     sha256_hex(canonical.to_string().as_bytes())[..16].to_string()
+}
+
+/// A grow recipe with every default filled in, so two spellings of the same
+/// tree (one terse, one exhaustive) are one design.
+fn canonical_recipe(sub: &Submission) -> Option<serde_json::Value> {
+    if sub.package != "grove" {
+        return None;
+    }
+    let r: grove::GrowRecipe = serde_json::from_value(sub.recipe.clone()?).ok()?;
+    serde_json::to_value(r).ok()
 }
 
 /// Float noise must not fork a design: 5.200000001 and 5.2 are one thing.

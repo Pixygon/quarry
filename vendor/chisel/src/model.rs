@@ -79,7 +79,10 @@ pub fn build(model: &Model) -> Result<Built, String> {
             }
         })
         .collect();
-    Ok(Built { name: model.name.clone(), parts })
+    Ok(Built {
+        name: model.name.clone(),
+        parts,
+    })
 }
 
 /// Mesh a shape, splitting plain unions into their own grids first.
@@ -103,7 +106,9 @@ fn mesh_components(shape: &infinite_manifest::shape::Shape, opts: MeshOptions) -
     if !splittable {
         return crate::mesh_with(shape, opts);
     }
-    let Shape::Group(g) = shape else { unreachable!() };
+    let Shape::Group(g) = shape else {
+        unreachable!()
+    };
     let mut out = MeshData::default();
     for part in &g.parts {
         let piece = mesh_components(part, opts);

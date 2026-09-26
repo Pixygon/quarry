@@ -28,7 +28,13 @@ pub struct PreviewOptions {
 
 impl Default for PreviewOptions {
     fn default() -> Self {
-        PreviewOptions { width: 512, height: 512, views: 3, pitch: 18.0, ss: 2 }
+        PreviewOptions {
+            width: 512,
+            height: 512,
+            views: 3,
+            pitch: 18.0,
+            ss: 2,
+        }
     }
 }
 
@@ -171,10 +177,20 @@ fn render_view(
             if area >= 0.0 {
                 continue;
             }
-            let minx = screen.iter().map(|s| s[0]).fold(f32::MAX, f32::min).floor().max(0.0) as u32;
+            let minx = screen
+                .iter()
+                .map(|s| s[0])
+                .fold(f32::MAX, f32::min)
+                .floor()
+                .max(0.0) as u32;
             let maxx =
                 (screen.iter().map(|s| s[0]).fold(f32::MIN, f32::max).ceil()).min(w as f32 - 1.0);
-            let miny = screen.iter().map(|s| s[1]).fold(f32::MAX, f32::min).floor().max(0.0) as u32;
+            let miny = screen
+                .iter()
+                .map(|s| s[1])
+                .fold(f32::MAX, f32::min)
+                .floor()
+                .max(0.0) as u32;
             let maxy =
                 (screen.iter().map(|s| s[1]).fold(f32::MIN, f32::max).ceil()).min(h as f32 - 1.0);
             if maxx < 0.0 || maxy < 0.0 {
@@ -187,7 +203,8 @@ fn render_view(
                     let w0 = edge(screen[1], screen[2], fx, fy);
                     let w1 = edge(screen[2], screen[0], fx, fy);
                     let w2 = edge(screen[0], screen[1], fx, fy);
-                    if !((w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0) || (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0))
+                    if !((w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0)
+                        || (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0))
                     {
                         continue;
                     }
@@ -256,7 +273,11 @@ fn render_view(
                         // Tangent-space normal → world, via the interpolated frame.
                         let tn = sample(&b.normal, b.size, uv);
                         let tsn = [tn[0] * 2.0 - 1.0, tn[1] * 2.0 - 1.0, tn[2] * 2.0 - 1.0];
-                        let t4 = m.tangents.get(idx[0]).copied().unwrap_or([1.0, 0.0, 0.0, 1.0]);
+                        let t4 = m
+                            .tangents
+                            .get(idx[0])
+                            .copied()
+                            .unwrap_or([1.0, 0.0, 0.0, 1.0]);
                         let t = norm(sub(
                             [t4[0], t4[1], t4[2]],
                             scale(n_geo, dot(n_geo, [t4[0], t4[1], t4[2]])),
@@ -268,7 +289,11 @@ fn render_view(
                             t[2] * tsn[0] + bt[2] * tsn[1] + n_geo[2] * tsn[2],
                         ]);
                     } else {
-                        albedo = [albedo[0] * vcol[0], albedo[1] * vcol[1], albedo[2] * vcol[2]];
+                        albedo = [
+                            albedo[0] * vcol[0],
+                            albedo[1] * vcol[1],
+                            albedo[2] * vcol[2],
+                        ];
                     }
 
                     let vdir = norm(sub(eye, world_point(m, idx, pw)));
@@ -325,7 +350,11 @@ fn render_view(
 }
 
 fn world_point(m: &crate::MeshData, idx: [usize; 3], pw: [f32; 3]) -> [f32; 3] {
-    let (a, b, c) = (m.positions[idx[0]], m.positions[idx[1]], m.positions[idx[2]]);
+    let (a, b, c) = (
+        m.positions[idx[0]],
+        m.positions[idx[1]],
+        m.positions[idx[2]],
+    );
     [
         a[0] * pw[0] + b[0] * pw[1] + c[0] * pw[2],
         a[1] * pw[0] + b[1] * pw[1] + c[1] * pw[2],
@@ -349,7 +378,12 @@ fn sample(buf: &[u8], size: u32, uv: [f32; 2]) -> [f32; 3] {
             buf[i + 2] as f32 / 255.0,
         ]
     };
-    let (c00, c10, c01, c11) = (at(x0, y0), at(x0 + 1.0, y0), at(x0, y0 + 1.0), at(x0 + 1.0, y0 + 1.0));
+    let (c00, c10, c01, c11) = (
+        at(x0, y0),
+        at(x0 + 1.0, y0),
+        at(x0, y0 + 1.0),
+        at(x0 + 1.0, y0 + 1.0),
+    );
     let mut out = [0f32; 3];
     for c in 0..3 {
         let a = c00[c] + (c10[c] - c00[c]) * fx;
@@ -366,7 +400,11 @@ fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

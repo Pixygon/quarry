@@ -163,7 +163,11 @@ impl Shape {
                     "sphere" => [p.r; 3],
                     "box" => {
                         let s = p.size.unwrap_or([1.0; 3]);
-                        [s[0] / 2.0 + p.rounded, s[1] / 2.0 + p.rounded, s[2] / 2.0 + p.rounded]
+                        [
+                            s[0] / 2.0 + p.rounded,
+                            s[1] / 2.0 + p.rounded,
+                            s[2] / 2.0 + p.rounded,
+                        ]
                     }
                     "cylinder" | "cone" => {
                         let r = p.r.max(p.r2);
@@ -228,7 +232,9 @@ impl Shape {
                 let (ymin, ymax) = l
                     .lathe
                     .iter()
-                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), p| (a.min(p[1]), b.max(p[1])));
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), p| {
+                        (a.min(p[1]), b.max(p[1]))
+                    });
                 (
                     [l.at[0] - rmax, l.at[1] + ymin, l.at[2] - rmax],
                     [l.at[0] + rmax, l.at[1] + ymax, l.at[2] + rmax],

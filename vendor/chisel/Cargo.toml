@@ -1,17 +1,21 @@
 [package]
-name = "chisel"
+# Published as `thread-chisel` — the bare `chisel` is an unrelated WebAssembly
+# transformation crate.
+name = "thread-chisel"
 version = "0.1.0"
 edition = "2021"
 authors = ["Pixygon"]
 license = "MIT OR Apache-2.0"
-description = "Chisel — the Thread's mesher: turns shape recipes (signed-distance trees) into renderable meshes. Blender for agents, one word at a time."
+description = "Chisel — the Thread's mesher: turns shape recipes and Weft model programs into renderable, PBR-complete meshes. Blender for agents, one word at a time."
+repository = "https://github.com/Pixygon/thread-engine"
 
 [dependencies]
 infinite-manifest = { package = "thread-manifest", path = "../infinite-manifest" }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Models as PROGRAMS: a Weft package export evaluates to a model. Weft is
 # pure Rust and dependency-light — the browser can carry it too.
-weft = { path = "../weft" }
+weft = { package = "weft-lang", path = "../weft" }
 
 [dev-dependencies]

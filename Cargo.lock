@@ -54,16 +54,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "chisel"
-version = "0.1.0"
-dependencies = [
- "image",
- "serde_json",
- "thread-manifest",
- "weft",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -239,13 +229,14 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 name = "quarry"
 version = "0.1.0"
 dependencies = [
- "chisel",
  "serde",
  "serde_json",
  "sha2",
+ "thread-chisel",
+ "thread-grove",
  "thread-manifest",
  "tokio",
- "weft",
+ "weft-lang",
 ]
 
 [[package]]
@@ -339,6 +330,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread-chisel"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "thread-manifest",
+ "weft-lang",
+]
+
+[[package]]
+name = "thread-grove"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thread-chisel",
+ "thread-manifest",
+]
+
+[[package]]
 name = "thread-manifest"
 version = "0.1.0"
 dependencies = [
@@ -405,7 +417,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
-name = "weft"
+name = "weft-lang"
 version = "0.1.0"
 dependencies = [
  "serde",

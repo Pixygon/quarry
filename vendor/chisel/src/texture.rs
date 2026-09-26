@@ -10,6 +10,7 @@ use infinite_manifest::texture::{TextureRecipe, MAX_SIZE};
 
 /// Baked RGBA8 maps, each `size × size`. `orm` is glTF-packed:
 /// R = occlusion, G = roughness, B = metallic.
+#[derive(Clone)]
 pub struct Baked {
     pub size: u32,
     pub albedo: Vec<u8>,
@@ -53,9 +54,11 @@ pub fn bake(t: &TextureRecipe) -> Baked {
             // mask noise ∈ ~[-0.5, 0.5]; coverage rises with `mix`.
             let blend = smoothstep((0.5 - t.mix) - 0.15, (0.5 - t.mix) + 0.15, m + 0.5);
             let i = (y * size + x) * 4;
-            for (dst, src) in
-                [(&mut out.albedo, &top.albedo), (&mut out.orm, &top.orm), (&mut out.normal, &top.normal)]
-            {
+            for (dst, src) in [
+                (&mut out.albedo, &top.albedo),
+                (&mut out.orm, &top.orm),
+                (&mut out.normal, &top.normal),
+            ] {
                 for c in 0..4 {
                     let a = dst[i + c] as f32;
                     let b = src[i + c] as f32;
@@ -121,7 +124,12 @@ fn bake_single(t: &TextureRecipe) -> Baked {
             normal[i + 3] = 255;
         }
     }
-    Baked { size: size as u32, albedo, normal, orm }
+    Baked {
+        size: size as u32,
+        albedo,
+        normal,
+        orm,
+    }
 }
 
 /// The pattern field at tile-space `(u, v)` — 0..1, wrapping at `t.scale`.
@@ -134,7 +142,12 @@ fn pattern(t: &TextureRecipe, u: f32, v: f32) -> f32 {
             let mut freq = 1.0;
             for o in 0..t.octaves.clamp(1, 8) {
                 sum += amp
-                    * value_noise(u * freq, v * freq, period * (1 << o), t.seed.wrapping_add(o));
+                    * value_noise(
+                        u * freq,
+                        v * freq,
+                        period * (1 << o),
+                        t.seed.wrapping_add(o),
+                    );
                 amp *= 0.5;
                 freq *= 2.0;
             }
@@ -147,7 +160,11 @@ fn pattern(t: &TextureRecipe, u: f32, v: f32) -> f32 {
         }
         "bricks" => {
             let row = v.floor();
-            let uu = u + if (row as i64).rem_euclid(2) == 1 { 0.5 } else { 0.0 };
+            let uu = u + if (row as i64).rem_euclid(2) == 1 {
+                0.5
+            } else {
+                0.0
+            };
             let (bu, bv) = (uu.fract(), v.fract());
             let mortar = 0.06;
             if bu < mortar || bv < mortar * 2.0 {
@@ -179,8 +196,13 @@ fn pattern(t: &TextureRecipe, u: f32, v: f32) -> f32 {
             let mut freq = 1.0;
             for o in 0..t.octaves.clamp(1, 6) {
                 turb += amp
-                    * value_noise(u * freq, v * freq, period * (1 << o), t.seed.wrapping_add(o))
-                        .abs();
+                    * value_noise(
+                        u * freq,
+                        v * freq,
+                        period * (1 << o),
+                        t.seed.wrapping_add(o),
+                    )
+                    .abs();
                 amp *= 0.5;
                 freq *= 2.0;
             }
@@ -236,7 +258,11 @@ fn value_noise(u: f32, v: f32, period: i64, seed: u32) -> f32 {
     let (fu, fv) = (u - iu as f32, v - iv as f32);
     let (su, sv) = (fu * fu * (3.0 - 2.0 * fu), fv * fv * (3.0 - 2.0 * fv));
     let g = |dx: i64, dy: i64| {
-        hash2((iu + dx).rem_euclid(period), (iv + dy).rem_euclid(period), seed) - 0.5
+        hash2(
+            (iu + dx).rem_euclid(period),
+            (iv + dy).rem_euclid(period),
+            seed,
+        ) - 0.5
     };
     let a = g(0, 0) + su * (g(1, 0) - g(0, 0));
     let b = g(0, 1) + su * (g(1, 1) - g(0, 1));

@@ -6,12 +6,13 @@ description = "The Quarry — the Thread's model store: publish a recipe, the st
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-# The four crates it takes to DERIVE a model from its recipe. Vendored (see
+# The five crates it takes to DERIVE a model from its recipe. Vendored (see
 # scripts/sync-vendor.sh) because Pixygon/Infinite is private — the same
 # reason wpm vendors weft.
-chisel = { path = "vendor/chisel" }
+chisel = { package = "thread-chisel", path = "vendor/chisel" }
+grove = { package = "thread-grove", path = "vendor/grove" }
 infinite-manifest = { package = "thread-manifest", path = "vendor/infinite-manifest" }
-weft = { path = "vendor/weft" }
+weft = { package = "weft-lang", path = "vendor/weft" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

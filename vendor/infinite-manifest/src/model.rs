@@ -185,11 +185,22 @@ impl Model {
         for (i, n) in self.nodes.iter().enumerate() {
             if !matches!(
                 n.prim.as_str(),
-                "sphere" | "box" | "cube" | "cylinder" | "cyl" | "capsule" | "cone" | "torus" | "lathe"
+                "sphere"
+                    | "box"
+                    | "cube"
+                    | "cylinder"
+                    | "cyl"
+                    | "capsule"
+                    | "cone"
+                    | "torus"
+                    | "lathe"
             ) {
                 return Err(format!("step {i}: unknown prim '{}'", n.prim));
             }
-            if !matches!(n.mode.as_str(), "add" | "union" | "blend" | "cut" | "intersect") {
+            if !matches!(
+                n.mode.as_str(),
+                "add" | "union" | "blend" | "cut" | "intersect"
+            ) {
                 return Err(format!("step {i}: unknown mode '{}'", n.mode));
             }
             if n.prim == "lathe" && n.profile.len() < 6 {
@@ -240,7 +251,11 @@ impl Model {
         let mut out = Vec::new();
         for (part, shape) in parts {
             let Some(shape) = shape else { continue };
-            let material = self.materials.get(part as usize).cloned().unwrap_or_default();
+            let material = self
+                .materials
+                .get(part as usize)
+                .cloned()
+                .unwrap_or_default();
             let name = if material.name == "part" && !self.name.is_empty() {
                 if self.materials.len() > 1 {
                     format!("{}-{}", self.name, part)
@@ -250,7 +265,11 @@ impl Model {
             } else {
                 material.name.clone()
             };
-            out.push(ResolvedPart { name, shape, material });
+            out.push(ResolvedPart {
+                name,
+                shape,
+                material,
+            });
         }
         if out.is_empty() {
             return Err("no parts resolved".into());

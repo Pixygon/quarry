@@ -96,6 +96,7 @@ fn seed(data: &PathBuf) {
             package: "weft-model".into(),
             export: export.to_string(),
             args: args.iter().map(|a| serde_json::json!(a)).collect(),
+            recipe: None,
             material: material.to_string(),
             license: "CC0-1.0".into(),
             author: "did:pixygon:quarry".into(),

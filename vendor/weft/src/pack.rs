@@ -51,7 +51,11 @@ impl Package {
         for (h, d) in hashed {
             map.insert(h, d);
         }
-        let pkg = Package { name: name.to_string(), exports: ex, defs: map };
+        let pkg = Package {
+            name: name.to_string(),
+            exports: ex,
+            defs: map,
+        };
         pkg.verify()?;
         Ok(pkg)
     }
@@ -67,12 +71,22 @@ impl Package {
         }
         for (name, h) in &self.exports {
             if !self.defs.contains_key(h) {
-                return Err(WeftError::Type(format!("export '{name}' points outside the package")));
+                return Err(WeftError::Type(format!(
+                    "export '{name}' points outside the package"
+                )));
             }
         }
         // Verify the def set as a module (entry choice is arbitrary).
-        if let Some(first) = self.exports.values().next().or_else(|| self.defs.keys().next()) {
-            let m = Module { defs: self.defs.clone(), entry: *first };
+        if let Some(first) = self
+            .exports
+            .values()
+            .next()
+            .or_else(|| self.defs.keys().next())
+        {
+            let m = Module {
+                defs: self.defs.clone(),
+                entry: *first,
+            };
             verify_module(&m)?;
         }
         Ok(())
@@ -123,7 +137,11 @@ pub fn link(
         }
     }
     let module = Module {
-        defs: module.defs.into_iter().filter(|(h, _)| keep.contains(h)).collect(),
+        defs: module
+            .defs
+            .into_iter()
+            .filter(|(h, _)| keep.contains(h))
+            .collect(),
         entry,
     };
     verify_module(&module)?;

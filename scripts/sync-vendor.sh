@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Vendor the four crates the Quarry needs to DERIVE a model from its recipe:
+# Vendor the five crates the Quarry needs to DERIVE a model from its recipe:
 # the id scheme, the manifest/model format, the Weft language (with its
 # modeling library), and chisel (carve, bake, export, preview). They are
 # copied rather than depended on because Pixygon/Infinite is private — the
 # same reason wpm vendors weft. Re-run after changing any of them.
 set -euo pipefail
-SRC="${1:-$HOME/repos/Infinite}"
+SRC="${1:-$HOME/repos/thread-engine}"
 DST="$(cd "$(dirname "$0")/.." && pwd)/vendor"
-for c in thread-id infinite-manifest weft chisel; do
+for c in thread-id infinite-manifest weft chisel grove; do
   rm -rf "$DST/$c"
   mkdir -p "$DST/$c"
   cp -r "$SRC/crates/$c/src" "$DST/$c/src"
@@ -24,12 +24,13 @@ versions = {
     "image": '{ version = "0.25", default-features = false, features = ["png"] }',
 }
 paths = {
-    "thread-id": '{ path = "../thread-id" }',
-    "infinite-manifest": '{ path = "../infinite-manifest" }',
-    "weft": '{ path = "../weft" }',
-    "chisel": '{ path = "../chisel" }',
+    "thread-id": '{ package = "thread-structured-id", path = "../thread-id" }',
+    "infinite-manifest": '{ package = "thread-manifest", path = "../infinite-manifest" }',
+    "weft": '{ package = "weft-lang", path = "../weft" }',
+    "chisel": '{ package = "thread-chisel", path = "../chisel" }',
+    "grove": '{ package = "thread-grove", path = "../grove" }',
 }
-for crate in ["thread-id", "infinite-manifest", "weft", "chisel"]:
+for crate in ["thread-id", "infinite-manifest", "weft", "chisel", "grove"]:
     p = dst / crate / "Cargo.toml"
     out, in_dev = [], False
     for line in p.read_text().splitlines():
@@ -65,15 +66,7 @@ for crate in ["thread-id", "infinite-manifest", "weft", "chisel"]:
         i = t.find("#[cfg(test)]")
         if i > 0:
             f.write_text(t[:i].rstrip() + "\n")
-# Two crates are published under neutral names; keep the aliases the
-# workspace uses so `use infinite_manifest::…` / `use thread_id::…` compile.
-for crate, old, new in [
-    ("chisel", 'infinite-manifest = { path = "../infinite-manifest" }',
-     'infinite-manifest = { package = "thread-manifest", path = "../infinite-manifest" }'),
-    ("infinite-manifest", 'thread-id = { path = "../thread-id" }',
-     'thread-id = { package = "thread-structured-id", path = "../thread-id" }'),
-]:
-    f = dst / crate / "Cargo.toml"
-    f.write_text(f.read_text().replace(old, new))
+# Every crate is published under a thread-* name; the path table above
+# carries the `package =` alias so `use chisel::…` / `use weft::…` compile.
 print("vendored:", ", ".join(sorted(p.name for p in dst.iterdir())))
 PY

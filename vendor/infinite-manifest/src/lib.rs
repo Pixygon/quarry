@@ -17,15 +17,18 @@
 //! - **Time is an axis.** A world declares a `year`; the same place is
 //!   addressable across time.
 //!
-//! See `docs/spec/world-manifest-v0.1.md` for the normative specification.
+//! See [world-manifest-v0.1](https://github.com/Pixygon/thread-spec/blob/main/specs/world-manifest-v0.1.md) for the normative
+//! specification — that document is the standard, and this crate is one
+//! implementation of it.
 
 pub mod arch;
 pub mod lint;
-pub mod model;
-pub mod shape;
-pub mod texture;
 mod locator;
 pub mod markup;
+pub mod model;
+pub mod plan;
+pub mod shape;
+pub mod texture;
 pub use locator::{well_known_url, Locator, SCHEME};
 
 use serde::{Deserialize, Serialize};
@@ -35,6 +38,15 @@ pub use thread_id::StructuredId;
 
 /// The format version tag carried in every manifest's `thread` field.
 pub const THREAD_VERSION: &str = "thread/0.1";
+
+/// Fields this build doesn't know about, carried through untouched.
+///
+/// A browser may ignore what it doesn't understand — it throws its parse away.
+/// A **tool** may not: it reads a world, changes one thing and writes it back,
+/// and anything it silently dropped is deleted from the author's disk. That
+/// includes every field added by an emitter newer than the reader, which is
+/// most of them over a format's life. So the structs keep the strangers.
+pub type Extra = std::collections::BTreeMap<String, serde_json::Value>;
 
 /// A World Manifest — one place on the Thread.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +81,9 @@ pub struct WorldManifest {
     /// Presence policy. Absent → the world is solo (static-first).
     #[serde(default)]
     pub presence: Option<Presence>,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
 }
 
 /// Identity + descriptive metadata for the world.
@@ -77,16 +92,24 @@ pub struct WorldMeta {
     /// Stable id, unique within the host (the last path segment of its Locator).
     pub id: String,
     pub title: String,
-    #[serde(default)]
+    /// Optional metadata is **omitted when unset**, never emitted as `null` or
+    /// `""`. A consumer should be able to test presence rather than presence-
+    /// and-emptiness; when a generated world carried `author: null` and
+    /// `description: ""`, the first tool to read it filled nothing in, because
+    /// its `or_insert` saw a key that was already there.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// Provider-agnostic author identity (DID-style), if declared.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<Identity>,
     /// Codex slugs describing this world (canonical meaning).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub codex: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
 }
 
 /// A portable, provider-agnostic identity (the open form of the Passport).
@@ -109,10 +132,110 @@ pub struct Environment {
     pub sky: Option<Sky>,
     #[serde(default)]
     pub bounds: Option<Bounds>,
+    /// A landscape, as a recipe. Absent -> the world is whatever its
+    /// placements make it; present -> the browser grows ground under them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain: Option<Terrain>,
     /// Opt-in game mechanics this world enforces on visitors. Absent → none (the
     /// browser stays a browser; most places are not games).
     #[serde(default)]
     pub rules: WorldRules,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
+}
+
+/// A landscape, described rather than shipped.
+///
+/// The same bargain the material and shape recipes already make: a few lines
+/// of intent instead of a heightmap nobody can download at world scale. The
+/// browser runs the generator ([`chisel::terrain`]) on arrival, so a continent
+/// costs the same bytes as a sentence and every browser grows the same one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Terrain {
+    /// The world's seed. Same seed, same land, on every machine, forever.
+    #[serde(default = "default_terrain_seed")]
+    pub seed: u32,
+    /// `plains` · `hills` · `alpine` · `badlands` · `archipelago`.
+    #[serde(default = "default_relief")]
+    pub relief: String,
+    /// Half-width in metres, or absent for unbounded — tiles stream in as the
+    /// traveler walks, so "as big as you like" costs nothing to declare.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extent: Option<f32>,
+    /// Metres. The shoreline.
+    #[serde(default)]
+    pub sea_level: f32,
+    /// 0 = equator, 1 = pole.
+    #[serde(default = "default_latitude")]
+    pub latitude: f32,
+    /// Prevailing wind. Rain falls on the windward side of what it climbs.
+    #[serde(default = "default_wind")]
+    pub wind: [f32; 2],
+    /// 0 = arid, 1 = drenched.
+    #[serde(default = "default_humidity")]
+    pub humidity: f32,
+    /// Metres per simulation cell. Smaller is finer and slower.
+    #[serde(default = "default_cell_size")]
+    pub cell_size: f32,
+    /// How much of each cover type grows here. Read by the scatter.
+    #[serde(default)]
+    pub cover: TerrainCover,
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
+}
+
+fn default_terrain_seed() -> u32 {
+    1337
+}
+fn default_relief() -> String {
+    "hills".into()
+}
+fn default_latitude() -> f32 {
+    0.45
+}
+fn default_wind() -> [f32; 2] {
+    [1.0, 0.0]
+}
+fn default_humidity() -> f32 {
+    0.6
+}
+fn default_cell_size() -> f32 {
+    4.0
+}
+
+impl Default for Terrain {
+    fn default() -> Self {
+        Self {
+            seed: default_terrain_seed(),
+            relief: default_relief(),
+            extent: None,
+            sea_level: 0.0,
+            latitude: default_latitude(),
+            wind: default_wind(),
+            humidity: default_humidity(),
+            cell_size: default_cell_size(),
+            cover: TerrainCover::default(),
+            extra: Default::default(),
+        }
+    }
+}
+
+/// How densely things grow. Multipliers on what the climate already allows —
+/// a desert with `trees: 1.0` is still a desert.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TerrainCover {
+    #[serde(default = "one")]
+    pub grass: f32,
+    #[serde(default = "one")]
+    pub trees: f32,
+    #[serde(default = "one")]
+    pub rocks: f32,
+}
+impl Default for TerrainCover {
+    fn default() -> Self {
+        Self { grass: 1.0, trees: 1.0, rocks: 1.0 }
+    }
 }
 
 /// Opt-in game mechanics a world enforces. **Default all off** — the browser
@@ -139,6 +262,59 @@ pub struct Sky {
     pub horizon: [f32; 3],
     #[serde(default)]
     pub sun_dir: Option<[f32; 3]>,
+    /// The world's weather. Absent means a clear sky.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clouds: Option<Clouds>,
+}
+
+/// A cloud deck: how much sky it covers and the altitudes it lives between.
+///
+/// Altitudes are metres in the world's own space, which is what lets a deck
+/// sit *in* a valley rather than always above everything — a cloud bank
+/// wrapping a mountain at its waist is the strongest sense-of-scale cue a
+/// landscape has, and it is only possible if weather has a height.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Clouds {
+    /// 0 = clear, 1 = overcast.
+    #[serde(default = "half")]
+    pub coverage: f32,
+    /// Metres. The deck's underside.
+    #[serde(default = "cloud_base")]
+    pub base: f32,
+    /// Metres. The deck's top.
+    #[serde(default = "cloud_top")]
+    pub top: f32,
+    /// How thick the cloud material is — how fast light dies inside it.
+    #[serde(default = "one")]
+    pub density: f32,
+    /// How darkly the deck prints its shadow on the ground, 0..1.
+    #[serde(default = "cloud_shadow")]
+    pub shadow: f32,
+}
+
+fn half() -> f32 {
+    0.5
+}
+fn cloud_base() -> f32 {
+    1400.0
+}
+fn cloud_top() -> f32 {
+    2300.0
+}
+fn cloud_shadow() -> f32 {
+    0.65
+}
+
+impl Default for Clouds {
+    fn default() -> Self {
+        Self {
+            coverage: half(),
+            base: cloud_base(),
+            top: cloud_top(),
+            density: 1.0,
+            shadow: cloud_shadow(),
+        }
+    }
 }
 
 /// Axis-aligned world bounds (advisory).
@@ -188,6 +364,9 @@ pub struct Prefab {
     pub mesh: MeshRef,
     #[serde(default)]
     pub material: Option<MaterialRef>,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
 }
 
 /// How a prefab's geometry is sourced. Exactly one field should be set.
@@ -314,6 +493,9 @@ pub struct Placement {
     /// coordinates. Defaults to none (a flat world is just a forest of depth 1).
     #[serde(default)]
     pub children: Vec<Placement>,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
 }
 
 impl Placement {
@@ -545,6 +727,9 @@ pub struct Portal {
     /// How much of the far side to show before stepping through.
     #[serde(default)]
     pub preview: PreviewPolicy,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
 }
 
 /// Portal preview fidelity.
@@ -598,6 +783,10 @@ pub struct Presence {
     /// Presence tier: `"solo"`, `"p2p"`, or `"relay"` (see presence-topology-v0.1).
     /// Absent → inferred from whether any relay is named. Forward-looking; a browser
     /// that only implements the relay tier treats `"p2p"` as a hint it may ignore.
+    ///
+    /// **Declaration, not fact.** The address fields decide what a browser can
+    /// actually do; `mode` states what the author meant, and MUST agree. When
+    /// they disagree the addresses win — see [`Presence::effective_mode`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     /// A single presence relay (legacy / old-browser compatibility). Absent → solo.
@@ -614,8 +803,11 @@ pub struct Presence {
     /// Tier-2 fallback when the mesh can't form (the hybrid story).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rendezvous: Option<String>,
-    #[serde(default)]
+    /// Omitted when unset — `null` here reads as "someone thought about the
+    /// cap and chose nothing", which is not what it means.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_occupants: Option<u32>,
+    /// Always emitted: `false` is a decision about this room, not a gap.
     #[serde(default)]
     pub voice: bool,
     /// The room lives only while its owner is present (a traveler's home with
@@ -623,14 +815,75 @@ pub struct Presence {
     /// to their own home rather than leave them in a dead copy of the world.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub owner_required: bool,
+    /// Unknown fields, preserved across a round trip (see [`Extra`]).
+    #[serde(flatten, default, skip_serializing_if = "Extra::is_empty")]
+    pub extra: Extra,
+}
+
+/// [`Presence::effective_mode`] for callers holding raw JSON.
+///
+/// Deserializing a whole world just to ask one question is the wrong trade for
+/// a tool that will write the file back: a round trip through any *older*
+/// struct than the emitter is a lossy edit of somebody's world. (Ours no longer
+/// is — see [`Extra`] — but a consumer pinned to an earlier release has no way
+/// to know that, and shouldn't have to.) So the rule is available without the
+/// type: pass the `presence` value, or `Value::Null` if the key is absent.
+pub fn effective_mode_of(presence: &serde_json::Value) -> &'static str {
+    let named = |v: &serde_json::Value| match v {
+        serde_json::Value::Array(a) => {
+            a.iter().any(|r| r.as_str().is_some_and(|s| !s.trim().is_empty()))
+        }
+        serde_json::Value::String(s) => !s.trim().is_empty(),
+        _ => false,
+    };
+    if named(&presence["relays"]) || named(&presence["relay"]) {
+        "relay"
+    } else if named(&presence["rendezvous"]) {
+        "p2p"
+    } else {
+        "solo"
+    }
 }
 
 impl Presence {
+    /// What this world can actually do, as opposed to what it says.
+    ///
+    /// `mode` is a declaration; the address fields are the facts, and a
+    /// declaration that contradicts them is not a second source of truth. A
+    /// world claiming `mode: "relay"` with no relay named cannot host anyone,
+    /// and one naming a relay is not solo however it is labelled. An **empty**
+    /// `relays: []` is the absence of a relay, never a considered choice of
+    /// none — a consumer deciding whether to supply one should read this rather
+    /// than test for a key, because which keys are present is an emitter's
+    /// business and this is not.
+    pub fn effective_mode(&self) -> &'static str {
+        if !self.relay_list().is_empty() {
+            "relay"
+        } else if self.rendezvous.is_some() {
+            "p2p"
+        } else {
+            "solo"
+        }
+    }
+
+    /// Whether `mode` claims something the addresses don't support — advisory,
+    /// for linters and conformance rather than for the render path.
+    pub fn mode_disagrees(&self) -> bool {
+        self.mode
+            .as_deref()
+            .is_some_and(|m| m != self.effective_mode())
+    }
+
     /// The effective, ordered, de-duplicated list of relays to try: `relays` first,
     /// then the legacy singular `relay` if it isn't already present. Empty → solo.
     pub fn relay_list(&self) -> Vec<String> {
-        let mut out = self.relays.clone();
-        if let Some(r) = &self.relay {
+        // A blank entry is not a relay you can reach, so it is not a relay —
+        // the same reading that makes an empty list an absence rather than a
+        // choice. Without this, `relays: [""]` counted as a hosted world and
+        // the browser tried to open a socket to nowhere.
+        let mut out: Vec<String> =
+            self.relays.iter().filter(|r| !r.trim().is_empty()).cloned().collect();
+        if let Some(r) = self.relay.as_ref().filter(|r| !r.trim().is_empty()) {
             if !out.contains(r) {
                 out.push(r.clone());
             }
@@ -640,11 +893,21 @@ impl Presence {
 }
 
 // --- serde defaults ---
-fn white() -> [f32; 4] { [1.0, 1.0, 1.0, 1.0] }
-fn one() -> f32 { 1.0 }
-fn one_u32() -> u32 { 1 }
-fn unit_quat() -> [f32; 4] { [0.0, 0.0, 0.0, 1.0] }
-fn unit_scale() -> [f32; 3] { [1.0, 1.0, 1.0] }
+fn white() -> [f32; 4] {
+    [1.0, 1.0, 1.0, 1.0]
+}
+fn one() -> f32 {
+    1.0
+}
+fn one_u32() -> u32 {
+    1
+}
+fn unit_quat() -> [f32; 4] {
+    [0.0, 0.0, 0.0, 1.0]
+}
+fn unit_scale() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
+}
 
 /// An error parsing or validating a manifest.
 #[derive(Debug)]
@@ -703,7 +966,10 @@ impl WorldManifest {
         if let Some(s) = self.spawns.iter().find(|s| s.name == name) {
             return Some(s.position);
         }
-        self.portals.iter().find(|p| p.id == name).map(|p| p.position)
+        self.portals
+            .iter()
+            .find(|p| p.id == name)
+            .map(|p| p.position)
     }
 
     /// The **effective** interaction for a placement after the `styles` cascade:
@@ -716,7 +982,8 @@ impl WorldManifest {
         }
         let mut best: Option<(u8, &Interaction)> = None;
         for rule in &self.styles {
-            let (Some(sel), Some(inter)) = (Selector::parse(&rule.select), &rule.interaction) else {
+            let (Some(sel), Some(inter)) = (Selector::parse(&rule.select), &rule.interaction)
+            else {
                 continue;
             };
             if sel.matches(pl) && best.is_none_or(|(s, _)| sel.specificity() >= s) {
@@ -733,7 +1000,10 @@ impl WorldManifest {
         let mut errs = Vec::new();
 
         if !self.thread.starts_with("thread/") {
-            errs.push(format!("unknown format tag '{}' (expected 'thread/…')", self.thread));
+            errs.push(format!(
+                "unknown format tag '{}' (expected 'thread/…')",
+                self.thread
+            ));
         }
         if self.world.id.trim().is_empty() {
             errs.push("world.id must not be empty".into());
@@ -747,8 +1017,11 @@ impl WorldManifest {
             self.behaviors.iter().map(|b| b.id.as_str()).collect();
 
         for p in &self.prefabs {
-            let sources =
-                [p.mesh.asset.is_some(), p.mesh.builtin.is_some(), p.mesh.shape.is_some()];
+            let sources = [
+                p.mesh.asset.is_some(),
+                p.mesh.builtin.is_some(),
+                p.mesh.shape.is_some(),
+            ];
             match sources.iter().filter(|s| **s).count() {
                 0 => errs.push(format!(
                     "prefab {} has no mesh source (asset, builtin, or shape)",
@@ -774,9 +1047,17 @@ impl WorldManifest {
         }
 
         // Every placement — including nested children (the tree/DOM model).
-        for (i, pl) in self.placements.iter().flat_map(|p| p.iter_tree()).enumerate() {
+        for (i, pl) in self
+            .placements
+            .iter()
+            .flat_map(|p| p.iter_tree())
+            .enumerate()
+        {
             if !prefab_ids.contains(&pl.prefab) {
-                errs.push(format!("placement[{i}] references unknown prefab {}", pl.prefab));
+                errs.push(format!(
+                    "placement[{i}] references unknown prefab {}",
+                    pl.prefab
+                ));
             }
             if let Some(b) = &pl.behavior {
                 if !behavior_ids.contains(b.as_str()) {
@@ -788,7 +1069,9 @@ impl WorldManifest {
                     errs.push(format!("placement[{i}] interaction has an empty label"));
                 }
                 if inter.hits == 0 {
-                    errs.push(format!("placement[{i}] interaction.hits must be at least 1"));
+                    errs.push(format!(
+                        "placement[{i}] interaction.hits must be at least 1"
+                    ));
                 }
             }
             if let Some(a) = &pl.animate {
@@ -799,14 +1082,19 @@ impl WorldManifest {
                     ));
                 }
                 if a.kind == "path" && a.points.len() < 2 {
-                    errs.push(format!("placement[{i}] animate path needs at least 2 points"));
+                    errs.push(format!(
+                        "placement[{i}] animate path needs at least 2 points"
+                    ));
                 }
             }
         }
 
         for (i, rule) in self.styles.iter().enumerate() {
             if Selector::parse(&rule.select).is_none() {
-                errs.push(format!("styles[{i}] has an empty/invalid selector '{}'", rule.select));
+                errs.push(format!(
+                    "styles[{i}] has an empty/invalid selector '{}'",
+                    rule.select
+                ));
             }
             if let Some(inter) = &rule.interaction {
                 if inter.label.trim().is_empty() {
@@ -822,14 +1110,19 @@ impl WorldManifest {
             // Exactly one code source: a wasm asset, a weft module asset, or
             // a weft package export (`weft_pack` + `weft_export` together).
             let has_pack = b.weft_pack.is_some();
-            let sources = usize::from(!b.wasm.is_empty()) + usize::from(b.weft.is_some()) + usize::from(has_pack);
+            let sources = usize::from(!b.wasm.is_empty())
+                + usize::from(b.weft.is_some())
+                + usize::from(has_pack);
             match sources {
                 0 => errs.push(format!(
                     "behavior '{}' names no code (wasm, weft, or weft_pack+weft_export)",
                     b.id
                 )),
                 1 => {}
-                _ => errs.push(format!("behavior '{}' names multiple code sources (pick one)", b.id)),
+                _ => errs.push(format!(
+                    "behavior '{}' names multiple code sources (pick one)",
+                    b.id
+                )),
             }
             if has_pack != b.weft_export.is_some() {
                 errs.push(format!(
@@ -839,22 +1132,34 @@ impl WorldManifest {
             }
             if let Some(w) = &b.weft {
                 if !asset_ids.contains(w.as_str()) {
-                    errs.push(format!("behavior '{}' references unknown weft asset '{w}'", b.id));
+                    errs.push(format!(
+                        "behavior '{}' references unknown weft asset '{w}'",
+                        b.id
+                    ));
                 }
             }
             if let Some(p) = &b.weft_pack {
                 if !asset_ids.contains(p.as_str()) {
-                    errs.push(format!("behavior '{}' references unknown weft package asset '{p}'", b.id));
+                    errs.push(format!(
+                        "behavior '{}' references unknown weft package asset '{p}'",
+                        b.id
+                    ));
                 }
             }
             if !b.wasm.is_empty() && !asset_ids.contains(b.wasm.as_str()) {
-                errs.push(format!("behavior '{}' references unknown wasm asset '{}'", b.id, b.wasm));
+                errs.push(format!(
+                    "behavior '{}' references unknown wasm asset '{}'",
+                    b.id, b.wasm
+                ));
             }
         }
 
         for p in &self.portals {
             if Locator::parse(&p.to).is_none() {
-                errs.push(format!("portal '{}' has an invalid destination Locator '{}'", p.id, p.to));
+                errs.push(format!(
+                    "portal '{}' has an invalid destination Locator '{}'",
+                    p.id, p.to
+                ));
             }
         }
 

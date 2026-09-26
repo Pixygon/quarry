@@ -67,13 +67,23 @@ fn get(t: Term, field: &str) -> Term {
     Term::Get(Box::new(t), field.to_string())
 }
 fn rec(fields: Vec<(&str, Term)>) -> Term {
-    Term::Rec(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    Term::Rec(
+        fields
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+    )
 }
 fn list(items: Vec<Term>) -> Term {
     Term::ListNew(items)
 }
 fn rec_ty(fields: Vec<(&str, Ty)>) -> Ty {
-    Ty::Record(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    Ty::Record(
+        fields
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+    )
 }
 fn fix_list_ty() -> Ty {
     Ty::List(Box::new(Ty::Fix))
@@ -81,7 +91,11 @@ fn fix_list_ty() -> Ty {
 /// A typed-but-empty `List(Fix)`: an empty `ListNew` has no element type, so
 /// a zero-cap map over a one-element list is how you say "none, of Fix".
 fn no_profile() -> Term {
-    Term::Map { cap: 0, list: Box::new(list(vec![fx(0.0)])), body: Box::new(var(0)) }
+    Term::Map {
+        cap: 0,
+        list: Box::new(list(vec![fx(0.0)])),
+        body: Box::new(var(0)),
+    }
 }
 
 /// Repetition caps. Static, because the fuel bound must be: a model with
@@ -204,7 +218,14 @@ fn copy_node(elem: u32, over: Vec<(&str, Term)>) -> Term {
 }
 
 fn def(params: Vec<Ty>, ret: Ty, body: Term) -> Def {
-    Def { params, ret, effects: BTreeSet::new(), body, pre: None, post: None }
+    Def {
+        params,
+        ret,
+        effects: BTreeSet::new(),
+        body,
+        pre: None,
+        post: None,
+    }
 }
 
 /// A def under construction, so later defs can `Call` earlier ones by hash.
@@ -215,12 +236,16 @@ struct Builder {
 
 impl Builder {
     fn new() -> Self {
-        Builder { defs: Vec::new(), by_name: BTreeMap::new() }
+        Builder {
+            defs: Vec::new(),
+            by_name: BTreeMap::new(),
+        }
     }
     fn add(&mut self, name: &str, d: Def) -> WeftHash {
         let h = hash_def(&d);
         self.defs.push(d);
-        self.by_name.insert(name.to_string(), (self.defs.len() - 1, h));
+        self.by_name
+            .insert(name.to_string(), (self.defs.len() - 1, h));
         h
     }
     fn call(&self, name: &str, args: Vec<Term>) -> Term {
@@ -244,14 +269,21 @@ pub fn package() -> Package {
     // --- primitives: each returns a one-step list, ready to compose --------
     b.add(
         "sphere",
-        def(vec![Ty::Fix], nodes_ty(), list(vec![node("sphere", vec![("r", var(0))])])),
+        def(
+            vec![Ty::Fix],
+            nodes_ty(),
+            list(vec![node("sphere", vec![("r", var(0))])]),
+        ),
     );
     b.add(
         "cube",
         def(
             vec![Ty::Fix, Ty::Fix, Ty::Fix],
             nodes_ty(),
-            list(vec![node("box", vec![("w", var(2)), ("h", var(1)), ("d", var(0))])]),
+            list(vec![node(
+                "box",
+                vec![("w", var(2)), ("h", var(1)), ("d", var(0))],
+            )]),
         ),
     );
     b.add(
@@ -275,7 +307,10 @@ pub fn package() -> Package {
         def(
             vec![Ty::Fix, Ty::Fix, Ty::Fix],
             nodes_ty(),
-            list(vec![node("cone", vec![("r", var(2)), ("r2", var(1)), ("h", var(0))])]),
+            list(vec![node(
+                "cone",
+                vec![("r", var(2)), ("r2", var(1)), ("h", var(0))],
+            )]),
         ),
     );
     b.add(
@@ -332,7 +367,10 @@ pub fn package() -> Package {
                 list: Box::new(var(1)),
                 body: Box::new(Term::Let(
                     // c = cos θ, computed at [element=0, deg=1, nodes=2]
-                    Box::new(p1(PrimOp::FCos, mul(div(var(1), fx(360.0)), Term::Fix(FIX_TAU)))),
+                    Box::new(p1(
+                        PrimOp::FCos,
+                        mul(div(var(1), fx(360.0)), Term::Fix(FIX_TAU)),
+                    )),
                     Box::new(Term::Let(
                         // s = sin θ, computed at [c=0, element=1, deg=2, nodes=3]
                         Box::new(p1(
@@ -452,7 +490,10 @@ pub fn package() -> Package {
             nodes_ty(),
             Term::Fold {
                 cap: REPEAT_CAP,
-                list: Box::new(Term::Iota { cap: REPEAT_CAP, count: Box::new(var(1)) }),
+                list: Box::new(Term::Iota {
+                    cap: REPEAT_CAP,
+                    count: Box::new(var(1)),
+                }),
                 init: Box::new(Term::Map {
                     cap: 0,
                     list: Box::new(var(2)),
@@ -511,7 +552,10 @@ pub fn package() -> Package {
             nodes_ty(),
             Term::Fold {
                 cap: REPEAT_CAP,
-                list: Box::new(Term::Iota { cap: REPEAT_CAP, count: Box::new(var(3)) }),
+                list: Box::new(Term::Iota {
+                    cap: REPEAT_CAP,
+                    count: Box::new(var(3)),
+                }),
                 init: Box::new(Term::Map {
                     cap: 0,
                     list: Box::new(var(4)),
@@ -581,7 +625,10 @@ pub fn package() -> Package {
             nodes_ty(),
             Term::Fold {
                 cap: REPEAT_CAP,
-                list: Box::new(Term::Iota { cap: REPEAT_CAP, count: Box::new(var(3)) }),
+                list: Box::new(Term::Iota {
+                    cap: REPEAT_CAP,
+                    count: Box::new(var(3)),
+                }),
                 init: Box::new(Term::Map {
                     cap: 0,
                     list: Box::new(b.call("cube", vec![fx(1.0), fx(1.0), fx(1.0)])),
@@ -733,7 +780,10 @@ pub fn package() -> Package {
                     b.call(
                         "join",
                         vec![
-                            b.call("at", vec![b.call("sphere", vec![var(1)]), fx(0.0), var(1), fx(0.0)]),
+                            b.call(
+                                "at",
+                                vec![b.call("sphere", vec![var(1)]), fx(0.0), var(1), fx(0.0)],
+                            ),
                             b.call(
                                 "cut",
                                 vec![b.call(
@@ -754,7 +804,14 @@ pub fn package() -> Package {
                         vec![b.call(
                             "at",
                             vec![
-                                b.call("cube", vec![mul(var(1), fx(4.0)), mul(var(1), fx(2.0)), mul(var(1), fx(4.0))]),
+                                b.call(
+                                    "cube",
+                                    vec![
+                                        mul(var(1), fx(4.0)),
+                                        mul(var(1), fx(2.0)),
+                                        mul(var(1), fx(4.0)),
+                                    ],
+                                ),
                                 fx(0.0),
                                 mul(var(1), fx(-0.85)),
                                 fx(0.0),
@@ -830,7 +887,10 @@ pub fn package() -> Package {
     // rock(r, seed): three spheres melted together and flattened — organic
     // form from a deterministic "random" (sin is a hash you can verify).
     let jitter = |seed: Term, salt: f32, amp: f32| {
-        mul(p1(PrimOp::FSin, add(mul(seed, fx(12.9898)), fx(salt))), fx(amp))
+        mul(
+            p1(PrimOp::FSin, add(mul(seed, fx(12.9898)), fx(salt))),
+            fx(amp),
+        )
     };
     b.add(
         "rock",
@@ -891,7 +951,11 @@ pub fn package() -> Package {
                             vec![
                                 b.call(
                                     "cube",
-                                    vec![mul(var(1), fx(6.0)), mul(var(1), fx(2.0)), mul(var(1), fx(6.0))],
+                                    vec![
+                                        mul(var(1), fx(6.0)),
+                                        mul(var(1), fx(2.0)),
+                                        mul(var(1), fx(6.0)),
+                                    ],
                                 ),
                                 fx(0.0),
                                 mul(var(1), fx(-1.0)),
@@ -922,7 +986,12 @@ pub fn package() -> Package {
             ("seed", int(seed)),
             (
                 "colors",
-                list(colors.into_iter().map(|c| list(vec![fx(c[0]), fx(c[1]), fx(c[2])])).collect()),
+                list(
+                    colors
+                        .into_iter()
+                        .map(|c| list(vec![fx(c[0]), fx(c[1]), fx(c[2])]))
+                        .collect(),
+                ),
             ),
             ("roughness", list(vec![fx(rough[0]), fx(rough[1])])),
             ("metallic", list(vec![fx(metal[0]), fx(metal[1])])),
@@ -943,23 +1012,23 @@ pub fn package() -> Package {
             ("resolution", int(48)),
             ("uv", txt(uv)),
             ("uv_scale", fx(0.5)),
-            (
-                "texture",
-                {
-                    let mut f: BTreeMap<String, Term> = match base {
-                        Term::Rec(m) => m,
-                        _ => unreachable!(),
-                    };
-                    f.insert("over".into(), match texture {
+            ("texture", {
+                let mut f: BTreeMap<String, Term> = match base {
+                    Term::Rec(m) => m,
+                    _ => unreachable!(),
+                };
+                f.insert(
+                    "over".into(),
+                    match texture {
                         Term::Rec(m) => Term::Rec(m),
                         _ => unreachable!(),
-                    });
-                    f.insert("mix".into(), fx(0.0));
-                    f.insert("mask_scale".into(), fx(3.0));
-                    f.insert("mask_seed".into(), int(0));
-                    Term::Rec(f)
-                },
-            ),
+                    },
+                );
+                f.insert("mix".into(), fx(0.0));
+                f.insert("mask_scale".into(), fx(3.0));
+                f.insert("mask_seed".into(), int(0));
+                Term::Rec(f)
+            }),
         ])
     };
     let moss_recipe = recipe(
@@ -977,42 +1046,130 @@ pub fn package() -> Package {
     for (name, r, uv) in [
         (
             "marble",
-            recipe("veins", 3.0, 5, 5, vec![[0.42, 0.43, 0.47], [0.86, 0.85, 0.83], [0.97, 0.96, 0.94]], [0.34, 0.20], [0.0, 0.0], 0.10, 0.20, 0.5),
+            recipe(
+                "veins",
+                3.0,
+                5,
+                5,
+                vec![[0.42, 0.43, 0.47], [0.86, 0.85, 0.83], [0.97, 0.96, 0.94]],
+                [0.34, 0.20],
+                [0.0, 0.0],
+                0.10,
+                0.20,
+                0.5,
+            ),
             "auto",
         ),
         (
             "granite",
-            recipe("voronoi", 7.0, 4, 11, vec![[0.40, 0.40, 0.43], [0.56, 0.54, 0.52], [0.33, 0.33, 0.38]], [0.95, 0.78], [0.0, 0.05], 0.40, 0.45, 0.5),
+            recipe(
+                "voronoi",
+                7.0,
+                4,
+                11,
+                vec![[0.40, 0.40, 0.43], [0.56, 0.54, 0.52], [0.33, 0.33, 0.38]],
+                [0.95, 0.78],
+                [0.0, 0.05],
+                0.40,
+                0.45,
+                0.5,
+            ),
             "auto",
         ),
         (
             "sandstone",
-            recipe("fbm", 5.0, 5, 3, vec![[0.72, 0.62, 0.45], [0.87, 0.79, 0.62]], [0.94, 0.82], [0.0, 0.0], 0.35, 0.35, 0.5),
+            recipe(
+                "fbm",
+                5.0,
+                5,
+                3,
+                vec![[0.72, 0.62, 0.45], [0.87, 0.79, 0.62]],
+                [0.94, 0.82],
+                [0.0, 0.0],
+                0.35,
+                0.35,
+                0.5,
+            ),
             "auto",
         ),
         (
             "wood",
-            recipe("wood", 4.0, 4, 7, vec![[0.32, 0.20, 0.11], [0.55, 0.36, 0.20], [0.44, 0.28, 0.15]], [0.78, 0.55], [0.0, 0.0], 0.30, 0.25, 0.0),
+            recipe(
+                "wood",
+                4.0,
+                4,
+                7,
+                vec![[0.32, 0.20, 0.11], [0.55, 0.36, 0.20], [0.44, 0.28, 0.15]],
+                [0.78, 0.55],
+                [0.0, 0.0],
+                0.30,
+                0.25,
+                0.0,
+            ),
             "box",
         ),
         (
             "iron",
-            recipe("fbm", 7.0, 4, 9, vec![[0.18, 0.18, 0.20], [0.34, 0.33, 0.35]], [0.55, 0.32], [0.9, 1.0], 0.18, 0.25, 0.0),
+            recipe(
+                "fbm",
+                7.0,
+                4,
+                9,
+                vec![[0.18, 0.18, 0.20], [0.34, 0.33, 0.35]],
+                [0.55, 0.32],
+                [0.9, 1.0],
+                0.18,
+                0.25,
+                0.0,
+            ),
             "auto",
         ),
         (
             "brass",
-            recipe("fbm", 6.0, 3, 13, vec![[0.52, 0.40, 0.15], [0.85, 0.70, 0.32]], [0.42, 0.22], [1.0, 1.0], 0.12, 0.20, 0.0),
+            recipe(
+                "fbm",
+                6.0,
+                3,
+                13,
+                vec![[0.52, 0.40, 0.15], [0.85, 0.70, 0.32]],
+                [0.42, 0.22],
+                [1.0, 1.0],
+                0.12,
+                0.20,
+                0.0,
+            ),
             "auto",
         ),
         (
             "terracotta",
-            recipe("fbm", 5.0, 5, 4, vec![[0.48, 0.26, 0.16], [0.70, 0.44, 0.27]], [0.80, 0.58], [0.0, 0.0], 0.22, 0.22, 0.0),
+            recipe(
+                "fbm",
+                5.0,
+                5,
+                4,
+                vec![[0.48, 0.26, 0.16], [0.70, 0.44, 0.27]],
+                [0.80, 0.58],
+                [0.0, 0.0],
+                0.22,
+                0.22,
+                0.0,
+            ),
             "auto",
         ),
         (
             "plaster",
-            recipe("fbm", 3.0, 4, 17, vec![[0.80, 0.78, 0.74], [0.92, 0.90, 0.86]], [0.92, 0.85], [0.0, 0.0], 0.10, 0.18, 0.5),
+            recipe(
+                "fbm",
+                3.0,
+                4,
+                17,
+                vec![[0.80, 0.78, 0.74], [0.92, 0.90, 0.86]],
+                [0.92, 0.85],
+                [0.0, 0.0],
+                0.10,
+                0.18,
+                0.5,
+            ),
             "auto",
         ),
         ("moss", moss_recipe.clone(), "auto"),
@@ -1070,8 +1227,17 @@ pub fn package() -> Package {
                     let tex = get(var(1), "texture");
                     let mut f: BTreeMap<String, Term> = BTreeMap::new();
                     for k in [
-                        "ao", "colors", "height", "kind", "metallic", "octaves", "roughness",
-                        "scale", "seed", "size", "triplanar",
+                        "ao",
+                        "colors",
+                        "height",
+                        "kind",
+                        "metallic",
+                        "octaves",
+                        "roughness",
+                        "scale",
+                        "seed",
+                        "size",
+                        "triplanar",
                     ] {
                         f.insert(k.into(), get(tex.clone(), k));
                     }
@@ -1091,7 +1257,11 @@ pub fn package() -> Package {
         def(
             vec![Ty::Text, nodes_ty(), Ty::List(Box::new(material_ty()))],
             model_ty(),
-            rec(vec![("name", var(2)), ("nodes", var(1)), ("materials", var(0))]),
+            rec(vec![
+                ("name", var(2)),
+                ("nodes", var(1)),
+                ("materials", var(0)),
+            ]),
         ),
     );
     b.add(
@@ -1099,7 +1269,60 @@ pub fn package() -> Package {
         def(
             vec![Ty::Text, nodes_ty(), material_ty()],
             model_ty(),
-            rec(vec![("name", var(2)), ("nodes", var(1)), ("materials", list(vec![var(0)]))]),
+            rec(vec![
+                ("name", var(2)),
+                ("nodes", var(1)),
+                ("materials", list(vec![var(0)])),
+            ]),
+        ),
+    );
+
+    // --- the catalog: what this package can MAKE, and how to ask ----------
+    //
+    // A layout that cannot find a part in the store needs to commission one,
+    // and to commission it must know which export makes a `column` and what
+    // to pass it. Declaring that here turns any published package into a
+    // *supplier*: the store stops being a pile of files and becomes a market
+    // of parts and the programs that make them.
+    //
+    // `args` is a tiny expression per parameter, evaluated by the binder
+    // against the need's own dimensions: `h`, `w`, `d` (metres), a literal
+    // number, or either scaled — `w*0.5`. `material` names a palette slot
+    // (`stone`, `wood`, `metal`) so a commission inherits the place's style.
+    let catalog_entry_ty = rec_ty(vec![
+        ("args", Ty::List(Box::new(Ty::Text))),
+        ("export", Ty::Text),
+        ("kind", Ty::Text),
+        ("material", Ty::Text),
+    ]);
+    let entry = |kind: &str, export: &str, args: Vec<&str>, material: &str| {
+        rec(vec![
+            ("kind", txt(kind)),
+            ("export", txt(export)),
+            ("args", list(args.into_iter().map(txt).collect())),
+            ("material", txt(material)),
+        ])
+    };
+    b.add(
+        "catalog",
+        def(
+            vec![],
+            Ty::List(Box::new(catalog_entry_ty)),
+            list(vec![
+                entry("column", "column", vec!["h", "w*0.5"], "stone"),
+                entry("arch", "arch", vec!["w", "h", "d"], "stone"),
+                entry(
+                    "stairs",
+                    "stairs",
+                    vec!["12", "h*0.083", "d*0.083", "w"],
+                    "stone",
+                ),
+                entry("table", "table", vec!["w", "d", "h"], "wood"),
+                entry("vessel", "vase", vec!["h", "w*0.34", "w*0.13"], "stone"),
+                entry("bowl", "bowl", vec!["w*0.5", "w*0.08"], "stone"),
+                entry("rock", "rock", vec!["w*0.5", "3"], "stone"),
+                entry("boulder", "rock", vec!["w*0.5", "7"], "stone"),
+            ]),
         ),
     );
 
@@ -1142,17 +1365,13 @@ pub fn package() -> Package {
                             ),
                         ],
                     ),
-                    list(vec![
-                        b.call("terracotta", vec![]),
-                        b.call("brass", vec![]),
-                    ]),
+                    list(vec![b.call("terracotta", vec![]), b.call("brass", vec![])]),
                 ],
             ),
         ),
     );
 
     let names: Vec<String> = b.by_name.keys().cloned().collect();
-    let exports: Vec<(&str, usize)> =
-        names.iter().map(|n| (n.as_str(), b.idx(n))).collect();
+    let exports: Vec<(&str, usize)> = names.iter().map(|n| (n.as_str(), b.idx(n))).collect();
     Package::build("weft-model", b.defs.clone(), exports).expect("library builds")
 }

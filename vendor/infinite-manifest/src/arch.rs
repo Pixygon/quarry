@@ -47,7 +47,12 @@ pub fn ring_segments(r: f32, n: usize, gates: &[f32], gate_reach_deg: f32) -> Ve
                 return None;
             }
             let (dx, dz) = az_dir(az_mid);
-            Some(RingSegment { x: dx * r, z: dz * r, yaw_deg: -az_mid, len: seg_len })
+            Some(RingSegment {
+                x: dx * r,
+                z: dz * r,
+                yaw_deg: -az_mid,
+                len: seg_len,
+            })
         })
         .collect()
 }

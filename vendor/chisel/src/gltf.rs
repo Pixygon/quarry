@@ -40,7 +40,13 @@ pub struct SceneNode {
 /// Pack a single mesh (+ optional baked material) into a binary glTF.
 pub fn write_glb(mesh: &MeshData, baked: Option<&Baked>, name: &str) -> Result<Vec<u8>, String> {
     write_glb_scene(
-        &[SceneMesh { name: name.into(), mesh, baked, base_color: [1.0; 4], emissive: 0.0 }],
+        &[SceneMesh {
+            name: name.into(),
+            mesh,
+            baked,
+            base_color: [1.0; 4],
+            emissive: 0.0,
+        }],
         &[SceneNode {
             name: name.into(),
             mesh: 0,
@@ -77,12 +83,34 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
 
     for sm in meshes {
         let mesh = sm.mesh;
-        let iv = push_view(&mut bin, &mesh.indices.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<_>>());
-        let pv = push_view(&mut bin, &f32s(&mesh.positions.iter().flatten().copied().collect::<Vec<_>>()));
-        let nv = push_view(&mut bin, &f32s(&mesh.normals.iter().flatten().copied().collect::<Vec<_>>()));
-        let uv = push_view(&mut bin, &f32s(&mesh.uvs.iter().flatten().copied().collect::<Vec<_>>()));
-        let tv = push_view(&mut bin, &f32s(&mesh.tangents.iter().flatten().copied().collect::<Vec<_>>()));
-        let cv = push_view(&mut bin, &f32s(&mesh.colors.iter().flatten().copied().collect::<Vec<_>>()));
+        let iv = push_view(
+            &mut bin,
+            &mesh
+                .indices
+                .iter()
+                .flat_map(|i| i.to_le_bytes())
+                .collect::<Vec<_>>(),
+        );
+        let pv = push_view(
+            &mut bin,
+            &f32s(&mesh.positions.iter().flatten().copied().collect::<Vec<_>>()),
+        );
+        let nv = push_view(
+            &mut bin,
+            &f32s(&mesh.normals.iter().flatten().copied().collect::<Vec<_>>()),
+        );
+        let uv = push_view(
+            &mut bin,
+            &f32s(&mesh.uvs.iter().flatten().copied().collect::<Vec<_>>()),
+        );
+        let tv = push_view(
+            &mut bin,
+            &f32s(&mesh.tangents.iter().flatten().copied().collect::<Vec<_>>()),
+        );
+        let cv = push_view(
+            &mut bin,
+            &f32s(&mesh.colors.iter().flatten().copied().collect::<Vec<_>>()),
+        );
 
         // Position bounds (required by the spec for POSITION accessors).
         let mut pmin = [f32::INFINITY; 3];
@@ -108,7 +136,11 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
         // and emissive. Nothing here needs an artist to finish it.
         let emissive_rgb = if sm.emissive > 0.0 {
             let e = sm.emissive.min(1.0);
-            [sm.base_color[0] * e, sm.base_color[1] * e, sm.base_color[2] * e]
+            [
+                sm.base_color[0] * e,
+                sm.base_color[1] * e,
+                sm.base_color[2] * e,
+            ]
         } else {
             [0.0, 0.0, 0.0]
         };
@@ -118,7 +150,8 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
                 let img = image::RgbaImage::from_raw(b.size, b.size, rgba.to_vec())
                     .ok_or("bad baked buffer size")?;
                 let mut out = Cursor::new(Vec::new());
-                img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+                img.write_to(&mut out, image::ImageFormat::Png)
+                    .map_err(|e| e.to_string())?;
                 let view = push_view(&mut bin, &out.into_inner());
                 images.push(serde_json::json!({
                     "bufferView": view, "mimeType": "image/png", "name": format!("{}-{}", sm.name, images.len()),

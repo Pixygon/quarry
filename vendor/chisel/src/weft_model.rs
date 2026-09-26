@@ -97,11 +97,16 @@ pub fn eval_export(
 ) -> Result<serde_json::Value, String> {
     let pkg: weft::pack::Package =
         serde_json::from_str(package_json).map_err(|e| format!("not a Weft package: {e}"))?;
-    pkg.verify().map_err(|e| format!("package failed verification: {e}"))?;
+    pkg.verify()
+        .map_err(|e| format!("package failed verification: {e}"))?;
     let hash = pkg
         .export(export)
         .ok_or_else(|| format!("package '{}' has no export '{export}'", pkg.name))?;
-    let entry = pkg.defs.get(&hash).cloned().ok_or("export verified to exist")?;
+    let entry = pkg
+        .defs
+        .get(&hash)
+        .cloned()
+        .ok_or("export verified to exist")?;
     let module = weft::pack::link(&[pkg], vec![entry.clone()], 0)
         .map_err(|e| format!("link failed: {e}"))?;
 
@@ -149,12 +154,16 @@ fn json_to_value(ty: &Ty, v: &serde_json::Value) -> Result<Value, String> {
         (Ty::Bool, serde_json::Value::Bool(b)) => Value::Bool(*b),
         (Ty::Text, serde_json::Value::String(s)) => Value::Text(s.clone()),
         (Ty::List(inner), serde_json::Value::Array(xs)) => Value::List(
-            xs.iter().map(|x| json_to_value(inner, x)).collect::<Result<_, _>>()?,
+            xs.iter()
+                .map(|x| json_to_value(inner, x))
+                .collect::<Result<_, _>>()?,
         ),
         (Ty::Record(fields), serde_json::Value::Object(map)) => {
             let mut out = std::collections::BTreeMap::new();
             for (k, fty) in fields {
-                let fv = map.get(k).ok_or_else(|| format!("argument missing field '{k}'"))?;
+                let fv = map
+                    .get(k)
+                    .ok_or_else(|| format!("argument missing field '{k}'"))?;
                 out.insert(k.clone(), json_to_value(fty, fv)?);
             }
             Value::Rec(out)
@@ -174,7 +183,9 @@ fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Text(s) => serde_json::Value::String(s.clone()),
         Value::List(xs) => serde_json::Value::Array(xs.iter().map(value_to_json).collect()),
         Value::Rec(fs) => serde_json::Value::Object(
-            fs.iter().map(|(k, x)| (k.clone(), value_to_json(x))).collect(),
+            fs.iter()
+                .map(|(k, x)| (k.clone(), value_to_json(x)))
+                .collect(),
         ),
         Value::Action { .. } => serde_json::Value::Null,
     }

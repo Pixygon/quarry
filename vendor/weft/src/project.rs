@@ -153,7 +153,12 @@ fn term(t: &Term, depth: usize) -> String {
             None => format!("?var{i}"),
         },
         Term::Let(v, b) => {
-            format!("let {} = {} in\n  {}", name(depth), term(v, depth), term(b, depth + 1))
+            format!(
+                "let {} = {} in\n  {}",
+                name(depth),
+                term(v, depth),
+                term(b, depth + 1)
+            )
         }
         Term::Map { cap, list, body } => format!(
             "map[{cap}] {} ({} -> {})",
@@ -162,7 +167,12 @@ fn term(t: &Term, depth: usize) -> String {
             term(body, depth + 1)
         ),
         Term::Iota { cap, count } => format!("iota[{cap}] {}", term(count, depth)),
-        Term::Fold { cap, list, init, body } => format!(
+        Term::Fold {
+            cap,
+            list,
+            init,
+            body,
+        } => format!(
             "fold[{cap}] {} from {} ({} {} -> {})",
             term(list, depth),
             term(init, depth),
@@ -189,8 +199,10 @@ fn term(t: &Term, depth: usize) -> String {
             format!("{}({})", prim_name(*op), xs.join(", "))
         }
         Term::Rec(fields) => {
-            let fs: Vec<String> =
-                fields.iter().map(|(k, v)| format!("{k}: {}", term(v, depth))).collect();
+            let fs: Vec<String> = fields
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", term(v, depth)))
+                .collect();
             format!("{{{}}}", fs.join(", "))
         }
         Term::Get(r, k) => format!("{}.{k}", term(r, depth)),
@@ -203,8 +215,10 @@ fn term(t: &Term, depth: usize) -> String {
             format!("{:?}({})", h, xs.join(", "))
         }
         Term::Effect(kind, fields) => {
-            let fs: Vec<String> =
-                fields.iter().map(|(k, v)| format!("{k}: {}", term(v, depth))).collect();
+            let fs: Vec<String> = fields
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", term(v, depth)))
+                .collect();
             format!("{}{{{}}}", effect_name(*kind), fs.join(", "))
         }
     }

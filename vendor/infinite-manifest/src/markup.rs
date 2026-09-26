@@ -96,12 +96,25 @@ pub fn compile(src: &str) -> Result<WorldManifest, String> {
     let mut manifest = WorldManifest {
         thread: crate::THREAD_VERSION.to_string(),
         world: WorldMeta {
-            id: world_el.attrs.get("id").cloned().unwrap_or_else(|| "world".into()),
-            title: world_el.attrs.get("title").cloned().unwrap_or_else(|| "Untitled".into()),
-            description: world_el.attrs.get("description").cloned().unwrap_or_default(),
+            id: world_el
+                .attrs
+                .get("id")
+                .cloned()
+                .unwrap_or_else(|| "world".into()),
+            title: world_el
+                .attrs
+                .get("title")
+                .cloned()
+                .unwrap_or_else(|| "Untitled".into()),
+            description: world_el
+                .attrs
+                .get("description")
+                .cloned()
+                .unwrap_or_default(),
             author: None,
             codex: vec![],
             license: None,
+            extra: Default::default(),
         },
         environment: Environment {
             sky: parse_sky(world_el.attrs.get("sky")),
@@ -117,6 +130,7 @@ pub fn compile(src: &str) -> Result<WorldManifest, String> {
         behaviors: vec![],
         styles,
         presence: parse_presence(world_el.attrs.get("presence"))?,
+        extra: Default::default(),
     };
 
     // Walk the world's children into placements/portals, synthesizing a prefab
@@ -194,7 +208,11 @@ fn emit(
     }
     if el.tag == "spawn" {
         manifest.spawns.push(Spawn {
-            name: el.attrs.get("name").cloned().unwrap_or_else(|| "entry".into()),
+            name: el
+                .attrs
+                .get("name")
+                .cloned()
+                .unwrap_or_else(|| "entry".into()),
             position: vec3(el.attrs.get("at"))?,
             yaw: el
                 .attrs
@@ -229,13 +247,18 @@ fn emit(
     }
     if el.tag == "portal" {
         manifest.portals.push(Portal {
-            id: el.attrs.get("id").cloned().unwrap_or_else(|| "portal".into()),
+            id: el
+                .attrs
+                .get("id")
+                .cloned()
+                .unwrap_or_else(|| "portal".into()),
             position: vec3(el.attrs.get("at"))?,
             rotation: rot_attr(el)?,
             scale: scale_attr(el)?,
             to: el.attrs.get("to").cloned().ok_or("<portal> needs a `to`")?,
             label: el.attrs.get("label").cloned().unwrap_or_default(),
             preview: Default::default(),
+            extra: Default::default(),
         });
         return Ok(());
     }
@@ -269,9 +292,15 @@ fn emit(
         base_color: resolve_prop(el, decls, "color")
             .and_then(|c| parse_color(&c))
             .unwrap_or([1.0, 1.0, 1.0, 1.0]),
-        metallic: resolve_prop(el, decls, "metallic").and_then(|v| v.parse().ok()).unwrap_or(0.0),
-        roughness: resolve_prop(el, decls, "roughness").and_then(|v| v.parse().ok()).unwrap_or(1.0),
-        emissive: resolve_prop(el, decls, "emissive").map(|v| parse_emissive(&v)).unwrap_or(0.0),
+        metallic: resolve_prop(el, decls, "metallic")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0),
+        roughness: resolve_prop(el, decls, "roughness")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0),
+        emissive: resolve_prop(el, decls, "emissive")
+            .map(|v| parse_emissive(&v))
+            .unwrap_or(0.0),
         texture,
     };
     let prefab = looks.ensure(&look, manifest);
@@ -314,9 +343,11 @@ fn emit(
             }
         }),
         animate: parse_animate(resolve_prop(el, decls, "animate")),
-        solid: el.attrs.get("solid").map(|v| v != "false").or_else(|| {
-            resolve_prop(el, decls, "solid").map(|v| v != "false")
-        }),
+        solid: el
+            .attrs
+            .get("solid")
+            .map(|v| v != "false")
+            .or_else(|| resolve_prop(el, decls, "solid").map(|v| v != "false")),
         light: el
             .attrs
             .get("light")
@@ -327,6 +358,7 @@ fn emit(
         interaction: None,
         data: data_attrs(el),
         children,
+        extra: Default::default(),
     });
     Ok(())
 }
@@ -353,7 +385,10 @@ fn parse_text_links(raw: &str) -> (String, Vec<crate::TextLink>) {
             None => (inner.trim(), inner.trim()),
         };
         if !to.is_empty() && !label.is_empty() {
-            links.push(crate::TextLink { text: label.to_string(), to: to.to_string() });
+            links.push(crate::TextLink {
+                text: label.to_string(),
+                to: to.to_string(),
+            });
             content.push_str(label);
         }
         rest = &after[close + 2..];
@@ -367,13 +402,32 @@ fn parse_text_links(raw: &str) -> (String, Vec<crate::TextLink>) {
 /// `light="r g b intensity"`, `light="r g b intensity range"`.
 fn parse_light(v: &str) -> Option<LightEmitter> {
     if v.trim() == "true" || v.trim().is_empty() {
-        return Some(LightEmitter { color: [1.0, 0.85, 0.6], intensity: 1.0, range: 10.0 });
+        return Some(LightEmitter {
+            color: [1.0, 0.85, 0.6],
+            intensity: 1.0,
+            range: 10.0,
+        });
     }
-    let n: Vec<f32> = v.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    let n: Vec<f32> = v
+        .split_whitespace()
+        .filter_map(|t| t.parse().ok())
+        .collect();
     match n.as_slice() {
-        [r, g, b] => Some(LightEmitter { color: [*r, *g, *b], intensity: 1.0, range: 10.0 }),
-        [r, g, b, i] => Some(LightEmitter { color: [*r, *g, *b], intensity: *i, range: 10.0 }),
-        [r, g, b, i, ra] => Some(LightEmitter { color: [*r, *g, *b], intensity: *i, range: *ra }),
+        [r, g, b] => Some(LightEmitter {
+            color: [*r, *g, *b],
+            intensity: 1.0,
+            range: 10.0,
+        }),
+        [r, g, b, i] => Some(LightEmitter {
+            color: [*r, *g, *b],
+            intensity: *i,
+            range: 10.0,
+        }),
+        [r, g, b, i, ra] => Some(LightEmitter {
+            color: [*r, *g, *b],
+            intensity: *i,
+            range: *ra,
+        }),
         _ => None,
     }
 }
@@ -416,8 +470,17 @@ fn parse_shape_children(children: &[Element]) -> Result<crate::shape::Shape, Str
 
 fn parse_shape_node(el: &Element) -> Result<crate::shape::Shape, String> {
     use crate::shape::{Group, Lathe, Prim, Shape};
-    let f = |k: &str, d: f32| el.attrs.get(k).and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
-    let at = if el.attrs.contains_key("at") { vec3(el.attrs.get("at"))? } else { [0.0; 3] };
+    let f = |k: &str, d: f32| {
+        el.attrs
+            .get(k)
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(d)
+    };
+    let at = if el.attrs.contains_key("at") {
+        vec3(el.attrs.get("at"))?
+    } else {
+        [0.0; 3]
+    };
     match el.tag.as_str() {
         "sphere" | "cylinder" | "capsule" | "cone" | "torus" | "box" => {
             let size = if el.tag == "box" {
@@ -460,7 +523,9 @@ fn parse_shape_node(el: &Element) -> Result<crate::shape::Shape, String> {
             let pts: Result<Vec<[f32; 2]>, String> = profile
                 .split(',')
                 .map(|pair| {
-                    let mut it = pair.split_whitespace().filter_map(|t| t.parse::<f32>().ok());
+                    let mut it = pair
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<f32>().ok());
                     match (it.next(), it.next()) {
                         (Some(r), Some(y)) => Ok([r, y]),
                         _ => Err(format!("lathe profile point '{pair}' — want `r y`")),
@@ -485,13 +550,20 @@ fn parse_texture_def(
     el: &Element,
     defined: &BTreeMap<String, crate::texture::TextureRecipe>,
 ) -> Result<crate::texture::TextureRecipe, String> {
-    let f = |k: &str, d: f32| el.attrs.get(k).and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+    let f = |k: &str, d: f32| {
+        el.attrs
+            .get(k)
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(d)
+    };
     let pair = |k: &str, d: [f32; 2]| -> Result<[f32; 2], String> {
         match el.attrs.get(k) {
             None => Ok(d),
             Some(v) => {
-                let nums: Vec<f32> =
-                    v.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+                let nums: Vec<f32> = v
+                    .split_whitespace()
+                    .filter_map(|t| t.parse().ok())
+                    .collect();
                 match nums.as_slice() {
                     [a] => Ok([*a, *a]),
                     [a, b] => Ok([*a, *b]),
@@ -505,8 +577,10 @@ fn parse_texture_def(
         Some(v) => v
             .split('|')
             .map(|c| {
-                let nums: Vec<f32> =
-                    c.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+                let nums: Vec<f32> = c
+                    .split_whitespace()
+                    .filter_map(|t| t.parse().ok())
+                    .collect();
                 match nums.as_slice() {
                     [r, g, b] => Ok([*r, *g, *b]),
                     _ => Err(format!("<texture> color '{c}' — want `r g b`")),
@@ -518,15 +592,16 @@ fn parse_texture_def(
     // granite) — defined earlier in the document, one level deep.
     let over = match el.attrs.get("over") {
         None => None,
-        Some(name) => Some(Box::new(
-            defined
-                .get(name)
-                .cloned()
-                .ok_or_else(|| format!("over=\"{name}\" — no such <texture> defined yet (define it first)"))?,
-        )),
+        Some(name) => Some(Box::new(defined.get(name).cloned().ok_or_else(|| {
+            format!("over=\"{name}\" — no such <texture> defined yet (define it first)")
+        })?)),
     };
     Ok(crate::texture::TextureRecipe {
-        kind: el.attrs.get("kind").cloned().ok_or("<texture> needs a `kind`")?,
+        kind: el
+            .attrs
+            .get("kind")
+            .cloned()
+            .ok_or("<texture> needs a `kind`")?,
         scale: f("scale", 4.0),
         octaves: f("octaves", 4.0) as u32,
         seed: f("seed", 0.0) as u32,
@@ -578,7 +653,11 @@ fn stamp_children(
     let apply = |pos: &mut [f32; 3], rot: &mut [f32; 4], scl: Option<&mut [f32; 3]>| {
         let scaled = [pos[0] * scale, pos[1] * scale, pos[2] * scale];
         let turned = quat_rotate(q, scaled);
-        *pos = [turned[0] + offset[0], turned[1] + offset[1], turned[2] + offset[2]];
+        *pos = [
+            turned[0] + offset[0],
+            turned[1] + offset[1],
+            turned[2] + offset[2],
+        ];
         *rot = quat_mul(q, *rot);
         if let Some(s) = scl {
             *s = [s[0] * scale, s[1] * scale, s[2] * scale];
@@ -589,7 +668,11 @@ fn stamp_children(
         // Children of a stamped placement are parent-relative — untouched.
     }
     for portal in &mut manifest.portals[g_before..] {
-        apply(&mut portal.position, &mut portal.rotation, Some(&mut portal.scale));
+        apply(
+            &mut portal.position,
+            &mut portal.rotation,
+            Some(&mut portal.scale),
+        );
     }
     Ok(())
 }
@@ -608,9 +691,27 @@ fn emit_use(
         .get(name)
         .ok_or_else(|| format!("<use model=\"{name}\"> — no such <model> defined"))?;
     let at = vec3(el.attrs.get("at"))?;
-    let yaw = el.attrs.get("yaw").and_then(|v| v.parse().ok()).unwrap_or(0.0);
-    let scale = el.attrs.get("scale").and_then(|v| v.parse().ok()).unwrap_or(1.0);
-    stamp_children(&model.children, manifest, decls, looks, models, depth, at, yaw, scale)
+    let yaw = el
+        .attrs
+        .get("yaw")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+    let scale = el
+        .attrs
+        .get("scale")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1.0);
+    stamp_children(
+        &model.children,
+        manifest,
+        decls,
+        looks,
+        models,
+        depth,
+        at,
+        yaw,
+        scale,
+    )
 }
 
 /// `<ring n=8 r=10 [at] [start=deg] [face="in|out|none"]>…</ring>` — stamp the
@@ -625,10 +726,28 @@ fn emit_ring(
     models: &std::collections::HashMap<String, &Element>,
     depth: usize,
 ) -> Result<(), String> {
-    let c = el.attrs.get("at").map(|_| vec3(el.attrs.get("at"))).transpose()?.unwrap_or([0.0; 3]);
-    let n = el.attrs.get("n").and_then(|v| v.parse::<usize>().ok()).unwrap_or(8).max(1);
-    let r = el.attrs.get("r").and_then(|v| v.parse::<f32>().ok()).unwrap_or(8.0);
-    let start = el.attrs.get("start").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+    let c = el
+        .attrs
+        .get("at")
+        .map(|_| vec3(el.attrs.get("at")))
+        .transpose()?
+        .unwrap_or([0.0; 3]);
+    let n = el
+        .attrs
+        .get("n")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8)
+        .max(1);
+    let r = el
+        .attrs
+        .get("r")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(8.0);
+    let start = el
+        .attrs
+        .get("start")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0);
     let face = el.attrs.get("face").map(String::as_str).unwrap_or("in");
     for k in 0..n {
         let az = start + k as f32 * 360.0 / n as f32;
@@ -642,7 +761,17 @@ fn emit_ring(
             "none" => 0.0,
             _ => -az,
         };
-        stamp_children(&el.children, manifest, decls, looks, models, depth, at, yaw, 1.0)?;
+        stamp_children(
+            &el.children,
+            manifest,
+            decls,
+            looks,
+            models,
+            depth,
+            at,
+            yaw,
+            1.0,
+        )?;
     }
     Ok(())
 }
@@ -660,12 +789,39 @@ fn emit_row(
 ) -> Result<(), String> {
     let a = vec3(el.attrs.get("from"))?;
     let b = vec3(el.attrs.get("to"))?;
-    let n = el.attrs.get("n").and_then(|v| v.parse::<usize>().ok()).unwrap_or(2).max(1);
-    let yaw = el.attrs.get("yaw").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let n = el
+        .attrs
+        .get("n")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(2)
+        .max(1);
+    let yaw = el
+        .attrs
+        .get("yaw")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
     for k in 0..n {
-        let t = if n == 1 { 0.5 } else { k as f32 / (n - 1) as f32 };
-        let at = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-        stamp_children(&el.children, manifest, decls, looks, models, depth, at, yaw, 1.0)?;
+        let t = if n == 1 {
+            0.5
+        } else {
+            k as f32 / (n - 1) as f32
+        };
+        let at = [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ];
+        stamp_children(
+            &el.children,
+            manifest,
+            decls,
+            looks,
+            models,
+            depth,
+            at,
+            yaw,
+            1.0,
+        )?;
     }
     Ok(())
 }
@@ -679,7 +835,11 @@ fn emit_lamp(
     looks: &mut LookRegistry,
 ) -> Result<(), String> {
     let at = vec3(el.attrs.get("at"))?;
-    let h = el.attrs.get("h").and_then(|v| v.parse::<f32>().ok()).unwrap_or(2.2);
+    let h = el
+        .attrs
+        .get("h")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(2.2);
     let light_c = el
         .attrs
         .get("color")
@@ -687,27 +847,59 @@ fn emit_lamp(
         .map(|c| [c[0], c[1], c[2]])
         .unwrap_or([1.0, 0.78, 0.45]);
     let post = looks.ensure(
-        &Look { mesh: "cylinder".into(), base_color: [0.20, 0.19, 0.22, 1.0], metallic: 0.6, roughness: 0.5, emissive: 0.0, texture: None },
+        &Look {
+            mesh: "cylinder".into(),
+            base_color: [0.20, 0.19, 0.22, 1.0],
+            metallic: 0.6,
+            roughness: 0.5,
+            emissive: 0.0,
+            texture: None,
+        },
         manifest,
     );
-    push_part(manifest, post, "lamp post", "lamp-post", [at[0], at[1] + h / 2.0, at[2]], 0.0, [
-        0.16,
-        h,
-        0.16,
-    ]);
+    push_part(
+        manifest,
+        post,
+        "lamp post",
+        "lamp-post",
+        [at[0], at[1] + h / 2.0, at[2]],
+        0.0,
+        [0.16, h, 0.16],
+    );
     let head = looks.ensure(
-        &Look { mesh: "cube".into(), base_color: [light_c[0], light_c[1] * 0.95, light_c[2] * 0.85, 1.0], metallic: 0.0, roughness: 0.2, emissive: 0.6, texture: None },
+        &Look {
+            mesh: "cube".into(),
+            base_color: [light_c[0], light_c[1] * 0.95, light_c[2] * 0.85, 1.0],
+            metallic: 0.0,
+            roughness: 0.2,
+            emissive: 0.6,
+            texture: None,
+        },
         manifest,
     );
     let head_i = manifest.placements.len();
-    push_part(manifest, head, "lamp", "lamp-head", [at[0], at[1] + h + 0.15, at[2]], 0.0, [
-        0.32, 0.32, 0.32,
-    ]);
+    push_part(
+        manifest,
+        head,
+        "lamp",
+        "lamp-head",
+        [at[0], at[1] + h + 0.15, at[2]],
+        0.0,
+        [0.32, 0.32, 0.32],
+    );
     manifest.placements[head_i].solid = Some(false);
     manifest.placements[head_i].light = Some(crate::LightEmitter {
         color: light_c,
-        intensity: el.attrs.get("intensity").and_then(|v| v.parse().ok()).unwrap_or(1.3),
-        range: el.attrs.get("range").and_then(|v| v.parse().ok()).unwrap_or(8.0),
+        intensity: el
+            .attrs
+            .get("intensity")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.3),
+        range: el
+            .attrs
+            .get("range")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8.0),
     });
     Ok(())
 }
@@ -754,6 +946,7 @@ fn push_part(
         interaction: None,
         data: serde_json::Value::Null,
         children: vec![],
+        extra: Default::default(),
     });
 }
 
@@ -781,7 +974,11 @@ fn emit_room(
     let gates: Vec<f32> = el
         .attrs
         .get("gates")
-        .map(|g| g.split_whitespace().filter_map(|t| t.parse().ok()).collect())
+        .map(|g| {
+            g.split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect()
+        })
         .unwrap_or_else(|| vec![180.0]);
     let wall_c = resolve_prop(el, decls, "color")
         .and_then(|v| parse_color(&v))
@@ -794,21 +991,57 @@ fn emit_room(
         .unwrap_or([0.85, 0.68, 0.28, 1.0]);
 
     let floor = looks.ensure(
-        &Look { mesh: "cylinder".into(), base_color: floor_c, metallic: 0.0, roughness: 0.9, emissive: 0.0, texture: None },
+        &Look {
+            mesh: "cylinder".into(),
+            base_color: floor_c,
+            metallic: 0.0,
+            roughness: 0.9,
+            emissive: 0.0,
+            texture: None,
+        },
         manifest,
     );
-    push_part(manifest, floor, "room floor", "room-floor", [c[0], c[1] + 0.03, c[2]], 0.0, [r * 2.0, 0.06, r * 2.0]);
+    push_part(
+        manifest,
+        floor,
+        "room floor",
+        "room-floor",
+        [c[0], c[1] + 0.03, c[2]],
+        0.0,
+        [r * 2.0, 0.06, r * 2.0],
+    );
     let wall_pf = looks.ensure(
-        &Look { mesh: "cube".into(), base_color: wall_c, metallic: 0.0, roughness: 0.85, emissive: 0.0, texture: None },
+        &Look {
+            mesh: "cube".into(),
+            base_color: wall_c,
+            metallic: 0.0,
+            roughness: 0.85,
+            emissive: 0.0,
+            texture: None,
+        },
         manifest,
     );
     let col_c = [wall_c[0] * 1.15, wall_c[1] * 1.15, wall_c[2] * 1.15, 1.0];
     let col_pf = looks.ensure(
-        &Look { mesh: "cylinder".into(), base_color: col_c, metallic: 0.05, roughness: 0.55, emissive: 0.0, texture: None },
+        &Look {
+            mesh: "cylinder".into(),
+            base_color: col_c,
+            metallic: 0.05,
+            roughness: 0.55,
+            emissive: 0.0,
+            texture: None,
+        },
         manifest,
     );
     let cap_pf = looks.ensure(
-        &Look { mesh: "cylinder".into(), base_color: accent_c, metallic: 0.8, roughness: 0.35, emissive: 0.1, texture: None },
+        &Look {
+            mesh: "cylinder".into(),
+            base_color: accent_c,
+            metallic: 0.8,
+            roughness: 0.35,
+            emissive: 0.1,
+            texture: None,
+        },
         manifest,
     );
 
@@ -827,13 +1060,33 @@ fn emit_room(
     }
     for (jx, jz) in crate::arch::ring_joints(r, n) {
         let col_h = h * 1.35;
-        push_part(manifest, col_pf, "column", "room-column", [c[0] + jx, c[1] + col_h / 2.0, c[2] + jz], 0.0, [0.5, col_h, 0.5]);
-        push_part(manifest, cap_pf, "capital", "room-capital", [c[0] + jx, c[1] + col_h + 0.09, c[2] + jz], 0.0, [0.7, 0.18, 0.7]);
+        push_part(
+            manifest,
+            col_pf,
+            "column",
+            "room-column",
+            [c[0] + jx, c[1] + col_h / 2.0, c[2] + jz],
+            0.0,
+            [0.5, col_h, 0.5],
+        );
+        push_part(
+            manifest,
+            cap_pf,
+            "capital",
+            "room-capital",
+            [c[0] + jx, c[1] + col_h + 0.09, c[2] + jz],
+            0.0,
+            [0.7, 0.18, 0.7],
+        );
     }
 
     // Children live in the room's frame: emit, then translate to its centre
     // (portals and spawns authored inside a room move with it too).
-    let (p0, po0, s0) = (manifest.placements.len(), manifest.portals.len(), manifest.spawns.len());
+    let (p0, po0, s0) = (
+        manifest.placements.len(),
+        manifest.portals.len(),
+        manifest.spawns.len(),
+    );
     for child in &el.children {
         emit(child, manifest, decls, looks, models, depth + 1)?;
     }
@@ -865,8 +1118,14 @@ fn emit_wall(
     looks: &mut LookRegistry,
 ) -> Result<(), String> {
     let two = |k: &str| -> Result<[f32; 2], String> {
-        let s = el.attrs.get(k).ok_or_else(|| format!("<wall> needs `{k}`"))?;
-        let n: Vec<f32> = s.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+        let s = el
+            .attrs
+            .get(k)
+            .ok_or_else(|| format!("<wall> needs `{k}`"))?;
+        let n: Vec<f32> = s
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
         match n.as_slice() {
             [x, z] => Ok([*x, *z]),
             _ => Err(format!("<wall {k}> expects 2 numbers, got '{s}'")),
@@ -884,7 +1143,14 @@ fn emit_wall(
         .and_then(|v| parse_color(&v))
         .unwrap_or([0.62, 0.58, 0.52, 1.0]);
     let pf = looks.ensure(
-        &Look { mesh: "cube".into(), base_color: color, metallic: 0.0, roughness: 0.85, emissive: 0.0, texture: None },
+        &Look {
+            mesh: "cube".into(),
+            base_color: color,
+            metallic: 0.0,
+            roughness: 0.85,
+            emissive: 0.0,
+            texture: None,
+        },
         manifest,
     );
     push_part(
@@ -892,7 +1158,11 @@ fn emit_wall(
         pf,
         &el.attrs.get("id").cloned().unwrap_or_else(|| "wall".into()),
         "wall",
-        [(from[0] + to[0]) / 2.0, y + h / 2.0, (from[1] + to[1]) / 2.0],
+        [
+            (from[0] + to[0]) / 2.0,
+            y + h / 2.0,
+            (from[1] + to[1]) / 2.0,
+        ],
         yaw_deg,
         [len, h, thick],
     );
@@ -960,10 +1230,15 @@ fn parse_presence(s: Option<&String>) -> Result<Option<crate::Presence>, String>
             max_occupants: None,
             voice: true,
             owner_required: false,
+            extra: Default::default(),
         })),
         urls if urls.starts_with("wss://") || urls.starts_with("ws://") => {
-            let relays: Vec<String> =
-                urls.split(',').map(str::trim).filter(|u| !u.is_empty()).map(String::from).collect();
+            let relays: Vec<String> = urls
+                .split(',')
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(String::from)
+                .collect();
             Ok(Some(crate::Presence {
                 mode: Some("relay".into()),
                 relay: None,
@@ -972,6 +1247,7 @@ fn parse_presence(s: Option<&String>) -> Result<Option<crate::Presence>, String>
                 max_occupants: None,
                 voice: true,
                 owner_required: false,
+                extra: Default::default(),
             }))
         }
         other => Err(format!(
@@ -988,7 +1264,11 @@ fn parse_rules(s: Option<&String>) -> Result<WorldRules, String> {
             "survival" => rules.survival = true,
             "gathering" => rules.gathering = true,
             "combat" => rules.combat = true,
-            other => return Err(format!("unknown rule '{other}' (survival|gathering|combat)")),
+            other => {
+                return Err(format!(
+                    "unknown rule '{other}' (survival|gathering|combat)"
+                ))
+            }
         }
     }
     Ok(rules)
@@ -1018,7 +1298,9 @@ fn interaction_styles(decls: &[StyleDecl]) -> Result<Vec<StyleRule>, String> {
             continue;
         };
         let hits = match d.props.get("interaction-hits") {
-            Some(h) => h.parse().map_err(|_| format!("bad interaction-hits '{h}'"))?,
+            Some(h) => h
+                .parse()
+                .map_err(|_| format!("bad interaction-hits '{h}'"))?,
             None => 1,
         };
         let mut effects = Vec::new();
@@ -1031,12 +1313,19 @@ fn interaction_styles(decls: &[StyleDecl]) -> Result<Vec<StyleRule>, String> {
         if let Some(msg) = d.props.get("interaction-message") {
             effects.push(InteractionEffect::Message(msg.clone()));
         }
-        if d.props.get("interaction-despawns").is_some_and(|v| v != "false") {
+        if d.props
+            .get("interaction-despawns")
+            .is_some_and(|v| v != "false")
+        {
             effects.push(InteractionEffect::Despawn);
         }
         styles.push(StyleRule {
             select: d.select.clone(),
-            interaction: Some(Interaction { label: label.clone(), hits, effects }),
+            interaction: Some(Interaction {
+                label: label.clone(),
+                hits,
+                effects,
+            }),
         });
     }
     Ok(styles)
@@ -1050,10 +1339,15 @@ fn parse_gives(v: &str) -> Result<InteractionEffect, String> {
         .and_then(|t| t.parse().ok())
         .ok_or_else(|| format!("interaction-gives needs an item id, got '{v}'"))?;
     let count = match toks.next() {
-        Some(c) => c.parse().map_err(|_| format!("bad interaction-gives count in '{v}'"))?,
+        Some(c) => c
+            .parse()
+            .map_err(|_| format!("bad interaction-gives count in '{v}'"))?,
         None => 1,
     };
-    Ok(InteractionEffect::GiveItem { item: StructuredId(id), count })
+    Ok(InteractionEffect::GiveItem {
+        item: StructuredId(id),
+        count,
+    })
 }
 
 /// Match an element against a simple selector, returning CSS specificity if it
@@ -1140,7 +1434,10 @@ fn parse_color(s: &str) -> Option<[f32; 4]> {
         "brown" => [0.4, 0.26, 0.13, 1.0],
         "gray" | "grey" => [0.5, 0.5, 0.5, 1.0],
         _ => {
-            let n: Vec<f32> = s.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+            let n: Vec<f32> = s
+                .split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect();
             return match n.as_slice() {
                 [r, g, b] => Some([*r, *g, *b, 1.0]),
                 [r, g, b, a] => Some([*r, *g, *b, *a]),
@@ -1182,13 +1479,26 @@ impl LookRegistry {
             return *id;
         }
         let mesh_ref = if BUILTINS.contains(&look.mesh.as_str()) {
-            MeshRef { asset: None, builtin: Some(look.mesh.clone()), shape: None, resolution: None }
+            MeshRef {
+                asset: None,
+                builtin: Some(look.mesh.clone()),
+                shape: None,
+                resolution: None,
+            }
         } else if let Some(name) = look.mesh.strip_prefix("shape:") {
             // A carved shape: the recipe rides in the prefab itself. The name
             // was checked against the registry at the usage site.
-            let (tree, resolution) =
-                self.shapes.get(name).cloned().expect("shape checked at usage site");
-            MeshRef { asset: None, builtin: None, shape: Some(tree), resolution }
+            let (tree, resolution) = self
+                .shapes
+                .get(name)
+                .cloned()
+                .expect("shape checked at usage site");
+            MeshRef {
+                asset: None,
+                builtin: None,
+                shape: Some(tree),
+                resolution,
+            }
         } else {
             // Dedup the asset URL across looks that share the mesh but differ in colour.
             let asset_id = match self.assets.get(&look.mesh) {
@@ -1196,24 +1506,41 @@ impl LookRegistry {
                 None => {
                     let aid = format!("mesh-{}", self.next_asset);
                     self.next_asset += 1;
-                    manifest.assets.push(Asset { id: aid.clone(), uri: look.mesh.clone(), kind: AssetKind::Gltf });
+                    manifest.assets.push(Asset {
+                        id: aid.clone(),
+                        uri: look.mesh.clone(),
+                        kind: AssetKind::Gltf,
+                    });
                     self.assets.insert(look.mesh.clone(), aid.clone());
                     aid
                 }
             };
-            MeshRef { asset: Some(asset_id), builtin: None, shape: None, resolution: None }
+            MeshRef {
+                asset: Some(asset_id),
+                builtin: None,
+                shape: None,
+                resolution: None,
+            }
         };
         let material = (!look.is_plain()).then(|| MaterialRef {
             base_color: look.base_color,
             metallic: look.metallic,
             roughness: look.roughness,
             emissive: look.emissive,
-            texture: look.texture.as_ref().and_then(|t| self.textures.get(t).cloned()),
+            texture: look
+                .texture
+                .as_ref()
+                .and_then(|t| self.textures.get(t).cloned()),
             ..Default::default()
         });
         let id = StructuredId(self.next_prefab);
         self.next_prefab += 1;
-        manifest.prefabs.push(Prefab { id, mesh: mesh_ref, material });
+        manifest.prefabs.push(Prefab {
+            id,
+            mesh: mesh_ref,
+            material,
+            extra: Default::default(),
+        });
         self.prefabs.insert(look.key(), id);
         id
     }
@@ -1251,7 +1578,11 @@ fn weft_binding(el: &Element, manifest: &mut WorldManifest) -> Option<String> {
             return None;
         }
         let aid = format!("weft-a{}", manifest.assets.len());
-        manifest.assets.push(Asset { id: aid.clone(), uri: uri.to_string(), kind: AssetKind::Weft });
+        manifest.assets.push(Asset {
+            id: aid.clone(),
+            uri: uri.to_string(),
+            kind: AssetKind::Weft,
+        });
         manifest.behaviors.push(crate::Behavior {
             id: bid.clone(),
             wasm: String::new(),
@@ -1264,7 +1595,11 @@ fn weft_binding(el: &Element, manifest: &mut WorldManifest) -> Option<String> {
     }
     let uri = el.attrs.get("weft")?;
     let aid = format!("weft-a{}", manifest.assets.len());
-    manifest.assets.push(Asset { id: aid.clone(), uri: uri.clone(), kind: AssetKind::Weft });
+    manifest.assets.push(Asset {
+        id: aid.clone(),
+        uri: uri.clone(),
+        kind: AssetKind::Weft,
+    });
     manifest.behaviors.push(crate::Behavior {
         id: bid.clone(),
         wasm: String::new(),
@@ -1284,14 +1619,22 @@ fn parse_animate(v: Option<String>) -> Option<Animate> {
     let kind = toks.next()?.to_string();
     let speed = toks.next().and_then(|t| t.parse().ok()).unwrap_or(1.0);
     let amp = toks.next().and_then(|t| t.parse().ok()).unwrap_or(0.25);
-    Some(Animate { kind, speed, amp, points: vec![] })
+    Some(Animate {
+        kind,
+        speed,
+        amp,
+        points: vec![],
+    })
 }
 
 // --- attribute parsing ---
 
 fn vec3(s: Option<&String>) -> Result<[f32; 3], String> {
     let s = s.map(String::as_str).unwrap_or("0 0 0");
-    let nums: Vec<f32> = s.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    let nums: Vec<f32> = s
+        .split_whitespace()
+        .filter_map(|t| t.parse().ok())
+        .collect();
     match nums.as_slice() {
         [x, y, z] => Ok([*x, *y, *z]),
         _ => Err(format!("expected 3 numbers, got '{s}'")),
@@ -1321,7 +1664,11 @@ fn rot_attr(el: &Element) -> Result<[f32; 4], String> {
 /// Euler degrees (x pitch, y yaw, z roll) → quaternion `[x y z w]`, composed
 /// `qy * qx * qz` (yaw, then pitch, then roll — the common authoring intuition).
 fn euler_deg_to_quat(x: f32, y: f32, z: f32) -> [f32; 4] {
-    let (hx, hy, hz) = (x.to_radians() / 2.0, y.to_radians() / 2.0, z.to_radians() / 2.0);
+    let (hx, hy, hz) = (
+        x.to_radians() / 2.0,
+        y.to_radians() / 2.0,
+        z.to_radians() / 2.0,
+    );
     let qx = [hx.sin(), 0.0, 0.0, hx.cos()];
     let qy = [0.0, hy.sin(), 0.0, hy.cos()];
     let qz = [0.0, 0.0, hz.sin(), hz.cos()];
@@ -1350,18 +1697,35 @@ fn parse_sky(s: Option<&String>) -> Option<Sky> {
         return Some(preset);
     }
     let mut segs = s.split('/');
-    let z: Vec<f32> = segs.next()?.split_whitespace().filter_map(|t| t.parse().ok()).collect();
-    let h: Vec<f32> = segs.next()?.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    let z: Vec<f32> = segs
+        .next()?
+        .split_whitespace()
+        .filter_map(|t| t.parse().ok())
+        .collect();
+    let h: Vec<f32> = segs
+        .next()?
+        .split_whitespace()
+        .filter_map(|t| t.parse().ok())
+        .collect();
     let sun: Vec<f32> = segs
         .next()
-        .map(|seg| seg.split_whitespace().filter_map(|t| t.parse().ok()).collect())
+        .map(|seg| {
+            seg.split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect()
+        })
         .unwrap_or_default();
     if let ([zx, zy, zz], [hx, hy, hz]) = (z.as_slice(), h.as_slice()) {
         let sun_dir = match sun.as_slice() {
             [sx, sy, sz] => Some([*sx, *sy, *sz]),
             _ => None,
         };
-        Some(Sky { zenith: [*zx, *zy, *zz], horizon: [*hx, *hy, *hz], sun_dir })
+        Some(Sky {
+            zenith: [*zx, *zy, *zz],
+            horizon: [*hx, *hy, *hz],
+            sun_dir,
+            clouds: None,
+        })
     } else {
         None
     }
@@ -1379,7 +1743,12 @@ fn sky_preset(name: &str) -> Option<Sky> {
         "void" => ([0.05, 0.06, 0.12], [0.18, 0.16, 0.24], [0.30, 0.70, 0.20]),
         _ => return None,
     };
-    Some(Sky { zenith, horizon, sun_dir: Some(sun) })
+    Some(Sky {
+        zenith,
+        horizon,
+        sun_dir: Some(sun),
+        clouds: None,
+    })
 }
 
 // --- <style> block ---
@@ -1405,7 +1774,9 @@ fn parse_style(body: &str) -> Result<Vec<StyleDecl>, String> {
         if block.is_empty() {
             continue;
         }
-        let (select, body) = block.split_once('{').ok_or_else(|| format!("style rule missing '{{': {block}"))?;
+        let (select, body) = block
+            .split_once('{')
+            .ok_or_else(|| format!("style rule missing '{{': {block}"))?;
         let mut props = BTreeMap::new();
         for decl in body.split(';') {
             if let Some((prop, val)) = decl.trim().split_once(':') {
@@ -1416,7 +1787,10 @@ fn parse_style(body: &str) -> Result<Vec<StyleDecl>, String> {
             }
         }
         if !props.is_empty() {
-            decls.push(StyleDecl { select: select.trim().to_string(), props });
+            decls.push(StyleDecl {
+                select: select.trim().to_string(),
+                props,
+            });
         }
     }
     Ok(decls)
@@ -1431,7 +1805,10 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(s: &'a str) -> Self {
-        Self { s: s.as_bytes(), i: 0 }
+        Self {
+            s: s.as_bytes(),
+            i: 0,
+        }
     }
 
     fn parse_all(&mut self) -> Result<Vec<Element>, String> {
@@ -1483,12 +1860,20 @@ impl<'a> Parser<'a> {
                 Some(b'/') => {
                     self.i += 1;
                     self.expect('>')?;
-                    return Ok(Element { tag, attrs, children: vec![] });
+                    return Ok(Element {
+                        tag,
+                        attrs,
+                        children: vec![],
+                    });
                 }
                 Some(b'>') => {
                     self.i += 1;
                     let children = self.parse_children(Some(&tag))?;
-                    return Ok(Element { tag, attrs, children });
+                    return Ok(Element {
+                        tag,
+                        attrs,
+                        children,
+                    });
                 }
                 Some(_) => {
                     let (k, v) = self.read_attr()?;
@@ -1510,13 +1895,18 @@ impl<'a> Parser<'a> {
         }
         self.i += 1;
         self.skip_ws();
-        let quote = self.peek().filter(|c| *c == b'"' || *c == b'\'').ok_or("attribute value must be quoted")?;
+        let quote = self
+            .peek()
+            .filter(|c| *c == b'"' || *c == b'\'')
+            .ok_or("attribute value must be quoted")?;
         self.i += 1;
         let start = self.i;
         while self.i < self.s.len() && self.s[self.i] != quote {
             self.i += 1;
         }
-        let val = std::str::from_utf8(&self.s[start..self.i]).unwrap_or_default().to_string();
+        let val = std::str::from_utf8(&self.s[start..self.i])
+            .unwrap_or_default()
+            .to_string();
         self.expect(quote as char)?;
         Ok((name, val))
     }
@@ -1531,7 +1921,9 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        std::str::from_utf8(&self.s[start..self.i]).unwrap_or_default().to_string()
+        std::str::from_utf8(&self.s[start..self.i])
+            .unwrap_or_default()
+            .to_string()
     }
 
     fn skip_ws(&mut self) {
@@ -1561,7 +1953,10 @@ impl<'a> Parser<'a> {
         self.s[self.i..].starts_with(p.as_bytes())
     }
     fn find_from(&self, from: usize, p: &str) -> Option<usize> {
-        self.s[from..].windows(p.len()).position(|w| w == p.as_bytes()).map(|k| from + k)
+        self.s[from..]
+            .windows(p.len())
+            .position(|w| w == p.as_bytes())
+            .map(|k| from + k)
     }
     fn expect(&mut self, c: char) -> Result<(), String> {
         if self.peek() == Some(c as u8) {

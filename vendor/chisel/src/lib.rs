@@ -13,9 +13,11 @@
 //! express, at a resolution the manifest chooses (load-time cost only —
 //! never in the frame loop; a 40³ grid meshes in well under a millisecond).
 
+pub mod builtin;
 pub mod gltf;
 pub mod model;
 pub mod preview;
+pub mod terrain;
 pub mod texture;
 pub mod weft_model;
 
@@ -147,8 +149,8 @@ fn polygon2(pts: &[[f32; 2]], p: [f32; 2]) -> f32 {
         let (a, b) = (pts[j], pts[i]);
         let e = [b[0] - a[0], b[1] - a[1]];
         let w = [p[0] - a[0], p[1] - a[1]];
-        let t = ((w[0] * e[0] + w[1] * e[1]) / (e[0] * e[0] + e[1] * e[1]).max(1e-12))
-            .clamp(0.0, 1.0);
+        let t =
+            ((w[0] * e[0] + w[1] * e[1]) / (e[0] * e[0] + e[1] * e[1]).max(1e-12)).clamp(0.0, 1.0);
         let dv = [w[0] - e[0] * t, w[1] - e[1] * t];
         d = d.min((dv[0] * dv[0] + dv[1] * dv[1]).sqrt());
         // Winding parity (crossing test).
@@ -201,7 +203,11 @@ impl UvMode {
                 _ => UvMode::Box,
             },
             // A carve of many parts: whatever the seed part wants.
-            Shape::Group(g) => g.parts.first().map(|p| UvMode::Auto.resolve(p)).unwrap_or(UvMode::Box),
+            Shape::Group(g) => g
+                .parts
+                .first()
+                .map(|p| UvMode::Auto.resolve(p))
+                .unwrap_or(UvMode::Box),
         }
     }
 }
@@ -218,14 +224,24 @@ pub struct MeshOptions {
 
 impl Default for MeshOptions {
     fn default() -> Self {
-        MeshOptions { resolution: None, uv: UvMode::Auto, uv_scale: 0.5 }
+        MeshOptions {
+            resolution: None,
+            uv: UvMode::Auto,
+            uv_scale: 0.5,
+        }
     }
 }
 
 /// Mesh a shape at `resolution` grid cells along its longest axis, with
 /// automatic UVs. See [`mesh_with`] for projection control.
 pub fn mesh(shape: &Shape, resolution: Option<u32>) -> MeshData {
-    mesh_with(shape, MeshOptions { resolution, ..Default::default() })
+    mesh_with(
+        shape,
+        MeshOptions {
+            resolution,
+            ..Default::default()
+        },
+    )
 }
 
 /// Mesh a shape with explicit options.
@@ -241,7 +257,9 @@ pub fn mesh_with(shape: &Shape, opts: MeshOptions) -> MeshData {
         }
     }
     let resolution = opts.resolution;
-    let res = resolution.unwrap_or(DEFAULT_RESOLUTION).clamp(8, MAX_RESOLUTION) as usize;
+    let res = resolution
+        .unwrap_or(DEFAULT_RESOLUTION)
+        .clamp(8, MAX_RESOLUTION) as usize;
     let (bmin, bmax) = shape.bounds();
     // Pad by one cell so the surface never touches the sampling boundary.
     let extent = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
@@ -252,7 +270,11 @@ pub fn mesh_with(shape: &Shape, opts: MeshOptions) -> MeshData {
         ((extent[1] / cell).ceil() as usize + 3).max(4),
         ((extent[2] / cell).ceil() as usize + 3).max(4),
     ];
-    let origin = [bmin[0] - 1.5 * cell, bmin[1] - 1.5 * cell, bmin[2] - 1.5 * cell];
+    let origin = [
+        bmin[0] - 1.5 * cell,
+        bmin[1] - 1.5 * cell,
+        bmin[2] - 1.5 * cell,
+    ];
     let corner = |i: usize, j: usize, k: usize| {
         [
             origin[0] + i as f32 * cell,
@@ -408,7 +430,12 @@ pub fn mesh_with(shape: &Shape, opts: MeshOptions) -> MeshData {
             }
         }
     }
-    project_uvs(&mut out, opts.uv.resolve(shape), opts.uv_scale, center_of(shape));
+    project_uvs(
+        &mut out,
+        opts.uv.resolve(shape),
+        opts.uv_scale,
+        center_of(shape),
+    );
     weld(&mut out);
     out
 }
@@ -428,11 +455,18 @@ fn weld(m: &mut MeshData) {
         let t = m.tangents.get(i).copied().unwrap_or([1.0, 0.0, 0.0, 1.0]);
         let c = m.colors.get(i).copied().unwrap_or([1.0; 4]);
         [
-            q(p[0], 1e5), q(p[1], 1e5), q(p[2], 1e5),
-            q(n[0], 1e4), q(n[1], 1e4), q(n[2], 1e4),
-            q(uv[0], 1e4), q(uv[1], 1e4),
-            q(t[0], 1e3), q(t[3], 1.0),
-            q(c[0], 1e3), q(c[1], 1e3),
+            q(p[0], 1e5),
+            q(p[1], 1e5),
+            q(p[2], 1e5),
+            q(n[0], 1e4),
+            q(n[1], 1e4),
+            q(n[2], 1e4),
+            q(uv[0], 1e4),
+            q(uv[1], 1e4),
+            q(t[0], 1e3),
+            q(t[3], 1.0),
+            q(c[0], 1e3),
+            q(c[1], 1e3),
         ]
     };
     let mut seen: HashMap<[u32; 12], u32> = HashMap::with_capacity(m.positions.len());
@@ -465,7 +499,11 @@ fn weld(m: &mut MeshData) {
 /// wrap around).
 fn center_of(shape: &Shape) -> [f32; 3] {
     let (min, max) = shape.bounds();
-    [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0, (min[2] + max[2]) / 2.0]
+    [
+        (min[0] + max[0]) / 2.0,
+        (min[1] + max[1]) / 2.0,
+        (min[2] + max[2]) / 2.0,
+    ]
 }
 
 /// Project UVs and derive tangents. Vertices are split per triangle
@@ -541,12 +579,16 @@ fn project_uvs(m: &mut MeshData, mode: UvMode, uv_scale: f32, center: [f32; 3]) 
                 unwrap_angles(&mut u, radial);
                 let circumference = radius * std::f32::consts::TAU;
                 for i in 0..3 {
-                    uv3[i] = [u[i] * circumference * uv_scale, v[i] * circumference * 0.5 * uv_scale];
+                    uv3[i] = [
+                        u[i] * circumference * uv_scale,
+                        v[i] * circumference * 0.5 * uv_scale,
+                    ];
                 }
             }
             _ => {
                 // Box: project along the face's dominant axis.
-                let ax = if face_n[0].abs() >= face_n[1].abs() && face_n[0].abs() >= face_n[2].abs() {
+                let ax = if face_n[0].abs() >= face_n[1].abs() && face_n[0].abs() >= face_n[2].abs()
+                {
                     0
                 } else if face_n[1].abs() >= face_n[2].abs() {
                     1
@@ -571,7 +613,11 @@ fn project_uvs(m: &mut MeshData, mode: UvMode, uv_scale: f32, center: [f32; 3]) 
         let tangent3 = if det.abs() < 1e-12 {
             // Degenerate UVs: any perpendicular works better than a NaN.
             let n = normalize(face_n);
-            let axis = if n[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
+            let axis = if n[1].abs() < 0.9 {
+                [0.0, 1.0, 0.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
             normalize(cross(axis, n))
         } else {
             let r = 1.0 / det;
@@ -597,7 +643,11 @@ fn project_uvs(m: &mut MeshData, mode: UvMode, uv_scale: f32, center: [f32; 3]) 
             let vn = m.normals[vi as usize];
             // Gram-Schmidt the tangent against this vertex's smooth normal.
             let t = normalize(sub(tangent3, scale3(vn, dot(vn, tangent3))));
-            let w = if dot(cross(vn, t), bitangent) < 0.0 { -1.0 } else { 1.0 };
+            let w = if dot(cross(vn, t), bitangent) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
             indices.push(positions.len() as u32);
             positions.push(p[i]);
             normals.push(vn);
@@ -622,23 +672,56 @@ fn exact_box(p: &infinite_manifest::shape::Prim, uv_scale: f32) -> MeshData {
     // (normal, tangent, the two extents the face spans)
     let faces: [([f32; 3], [f32; 3], [[f32; 3]; 4]); 6] = [
         // +X
-        ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0],
-         [[hx, -hy, hz], [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz]]),
+        (
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [[hx, -hy, hz], [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz]],
+        ),
         // −X
-        ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0],
-         [[-hx, -hy, -hz], [-hx, -hy, hz], [-hx, hy, hz], [-hx, hy, -hz]]),
+        (
+            [-1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [
+                [-hx, -hy, -hz],
+                [-hx, -hy, hz],
+                [-hx, hy, hz],
+                [-hx, hy, -hz],
+            ],
+        ),
         // +Y
-        ([0.0, 1.0, 0.0], [1.0, 0.0, 0.0],
-         [[-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz], [-hx, hy, -hz]]),
+        (
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [[-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz], [-hx, hy, -hz]],
+        ),
         // −Y
-        ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0],
-         [[-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz]]),
+        (
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [
+                [-hx, -hy, -hz],
+                [hx, -hy, -hz],
+                [hx, -hy, hz],
+                [-hx, -hy, hz],
+            ],
+        ),
         // +Z
-        ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0],
-         [[-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz]]),
+        (
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [[-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz]],
+        ),
         // −Z
-        ([0.0, 0.0, -1.0], [-1.0, 0.0, 0.0],
-         [[hx, -hy, -hz], [-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz]]),
+        (
+            [0.0, 0.0, -1.0],
+            [-1.0, 0.0, 0.0],
+            [
+                [hx, -hy, -hz],
+                [-hx, -hy, -hz],
+                [-hx, hy, -hz],
+                [hx, hy, -hz],
+            ],
+        ),
     ];
     let yaw = (-p.rot).to_radians();
     let (sin, cos) = (yaw.sin(), yaw.cos());
@@ -656,14 +739,16 @@ fn exact_box(p: &infinite_manifest::shape::Prim, uv_scale: f32) -> MeshData {
         let bt = cross(n, t);
         for c in corners {
             let world = turn(c);
-            m.positions.push([world[0] + p.at[0], world[1] + p.at[1], world[2] + p.at[2]]);
+            m.positions
+                .push([world[0] + p.at[0], world[1] + p.at[1], world[2] + p.at[2]]);
             m.normals.push(n);
             // Face-local UVs: project the corner onto the face's own axes.
             m.uvs.push([dot(c, t) * uv_scale, dot(c, bt) * uv_scale]);
             m.tangents.push([t[0], t[1], t[2], 1.0]);
             m.colors.push([1.0, 1.0, 1.0, 1.0]);
         }
-        m.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        m.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
     m
 }
@@ -690,7 +775,9 @@ fn unwrap_angles(u: &mut [f32; 3], radial: [f32; 3]) {
         u.iter().copied().fold(f32::MIN, f32::max),
     );
     if umax - umin > 0.5 {
-        let best = (0..3).max_by(|a, b| radial[*a].total_cmp(&radial[*b])).unwrap_or(0);
+        let best = (0..3)
+            .max_by(|a, b| radial[*a].total_cmp(&radial[*b]))
+            .unwrap_or(0);
         *u = [u[best]; 3];
     }
 }
@@ -699,7 +786,11 @@ fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

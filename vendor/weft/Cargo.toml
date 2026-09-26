@@ -1,10 +1,13 @@
 [package]
-name = "weft"
+# Published as `weft-lang` — the bare `weft` is an unrelated HTML templating
+# crate. "Weft" remains the language's name everywhere it is spoken about.
+name = "weft-lang"
 version = "0.1.0"
 edition = "2021"
-description = "Weft — the Thread's native code format: content-addressed, verified, total program graphs (spec: docs/spec/weft-v0.1.md)"
+authors = ["Pixygon"]
+description = "Weft — the Thread's native code format: content-addressed, verified, total program graphs that cannot diverge, allocate unboundedly, or lie about what they are."
+repository = "https://github.com/Pixygon/thread-engine"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Pixygon/quarry"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

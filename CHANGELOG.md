@@ -4,6 +4,18 @@ All notable changes to **Quarry**. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this file is
 materialized from the Pixygon Changelog API — edit there, not here.
 
+## [0.7.0] — 2026-09-27
+
+### Added
+- Quarry can now accept avatar items directly: post a manifested GLB (a Unity-exported file carrying the Portable Item Convention's manifest) to /publish and it is checked, measured, and stored byte-for-byte — no re-export, no data loss. The same file always produces the same design id, no matter who submits it.
+- Avatar items are validated against every rule of the Portable Item Convention — manifest schema, valid slot, embedded textures, metallic-roughness materials, correctly-scaled metres, ground-aligned origin, and named skin joints for bodies and garments. Each rule's pass/fail result is recorded with the entry so exporters can see exactly what needs fixing.
+
+### Changed
+- Publishing an avatar item auto-fills its title, description, kind, tags, and linked Codex concept straight from the item's own manifest, so you no longer need to supply that information separately unless you want to override it.
+- The upload size limit is now higher (64MB instead of 8MB) specifically for GLB uploads, since avatar items with embedded textures are much larger than ordinary recipes.
+- The Make page's Avatar door now shows a live checklist of convention rules against an uploaded GLB instead of just being marked as unavailable.
+
+
 ## [0.6.0] — 2026-09-27
 
 ### Added

@@ -136,3 +136,15 @@ dialog.maker::backdrop{background:rgba(6,7,9,.72)}
   .stage{min-height:0}
   .pane{min-height:260px}
 }
+
+/* The convention, ticked or crossed. */
+.checks{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px;font:11.5px/1.4 var(--mono)}
+.checks li{display:flex;gap:8px;align-items:baseline;color:var(--mute)}
+.checks li b{font-weight:500;min-width:72px;color:var(--ink)}
+.checks li::before{content:"✓";color:var(--grove);flex:none}
+.checks li.bad::before{content:"✗";color:var(--avatar)}
+.checks li.bad{color:var(--ink)}.checks li.bad b{color:var(--avatar)}
+.drop{display:flex;align-items:center;justify-content:center;min-height:84px;border:1px dashed var(--edge);border-radius:6px;color:var(--mute);cursor:pointer;padding:12px;text-align:center;font-family:var(--display);font-style:italic;font-size:15px}
+.drop:hover,.drop.over{border-color:var(--avatar);color:var(--ink)}
+.drop input{position:absolute;left:-9999px}
+.door code{font:11.5px var(--mono);color:var(--ink)}

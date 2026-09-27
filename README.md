@@ -31,8 +31,14 @@ turned, judged and made in:
 - **Make** — a door each for Chisel (a library shape, its args, a material)
   and Grove (a plant: its species in a form and as JSON, from blank or from
   anything on the shelf, plus the **seed**, the **clock** — age in seasons,
-  season in the year — and whether it is **withered**). Avatar's door is
-  shown and is honest about being shut. Both doors can **derive without publishing**, so you look before the
+  season in the year — and whether it is **withered**). **Avatar**'s door
+  takes a *manifested GLB* — the Portable Item Convention's own unit of
+  exchange, one file that is the whole item — and does not derive it: it
+  reads the file the way every consumer will, holds it to the convention
+  rule by rule (schema-1 manifest, a real slot, textures embedded,
+  metallic-roughness, a named skin for bodies and garments, metres, feet on
+  the ground), measures it, and keeps the bytes untouched. The checklist is
+  what the door shows, so an exporter learns exactly what is wrong. Both doors can **derive without publishing**, so you look before the
   shelf gains anything.
 
 The page is rendered by this binary with every entry already in the HTML —
@@ -50,7 +56,7 @@ JavaScript only adds the parts a page of HTML cannot do.
 | `GET /models/search?kind=column&h=5.2&tol=0.3&style=classical` | **ranked by fit** — for layout engines |
 | `GET /models/<design>.json` · `.glb` · `.png` | the entry, the artifact, the preview |
 | `GET /library` | what the Make door may offer: the shapes with the arity the library itself declares, its materials, the grower's blank recipe |
-| `POST /publish` | a submission (recipe + words) → derived, then stored |
+| `POST /publish` | a submission (recipe + words) → derived, then stored. A body of `content-type: model/gltf-binary` is an avatar item: checked, measured, stored as it came; `?title=&tags=&style=&codex=` may add words the manifest lacks |
 | `POST /derive` | the same, **kept off the shelf** → served from `/derived/<design>.glb`, swept as it fills |
 | `POST /models/<design>/verdict` | `{verdict, note}` → kept on the entry |
 | `POST /models/<design>/concept` | `{codex, concept}` → the Codex entity and the image to judge against |
@@ -62,6 +68,8 @@ entry.
 ## What an entry carries
 
 - **design** — the hash of the recipe. Same recipe → same design, whoever asks.
+  An avatar item has no recipe but the file, so its design is the hash of the
+  bytes — the same file is the same design from anyone.
   The hash is over the recipe's *canonical* form: numbers rounded past f32
   noise, and — for a grown thing — every field the grower would have filled
   in by default stripped out, inside nested recipes too. A rule Grove gains

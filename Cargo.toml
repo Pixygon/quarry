@@ -1,6 +1,6 @@
 [package]
 name = "quarry"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "The Quarry — the Thread's model store: publish a recipe, the store derives the artifact. Models that are what they say they are."
 license = "MIT OR Apache-2.0"
@@ -11,6 +11,12 @@ license = "MIT OR Apache-2.0"
 # reason wpm vendors weft.
 chisel = { package = "thread-chisel", path = "vendor/chisel" }
 grove = { package = "thread-grove", path = "vendor/grove" }
+# The Portable Item Convention: the manifest a part GLB carries, and the slot
+# names it may claim. The Quarry checks a GLB against it.
+avatar = { package = "thread-avatar", path = "vendor/infinite-avatar" }
+# Reading a GLB somebody else made — geometry, skins, images, materials —
+# so the facts are measured off the file, never copied from its manifest.
+gltf = { version = "1.4", default-features = false, features = ["import", "utils", "names", "extras"] }
 infinite-manifest = { package = "thread-manifest", path = "vendor/infinite-manifest" }
 weft = { package = "weft-lang", path = "vendor/weft" }
 serde = { version = "1", features = ["derive"] }

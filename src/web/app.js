@@ -32,6 +32,7 @@ const state = {
   wind: false,
   judge: false,
   preview: null,   // an unshelved derive sitting on the table
+  bones: false,
 };
 
 const fmt = (n) => Number(n).toLocaleString('en-US');
@@ -150,6 +151,12 @@ function show() {
   $('#sockets').innerHTML = sk.length
     ? `<dt>Count</dt><dd>${sk.length}</dd><dt>Kinds</dt><dd>${esc(Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(' · ') || '—')}</dd><dt>First</dt><dd>${esc(sk[0].name)} @ ${sk[0].at.map((v) => v.toFixed(2)).join(', ')}</dd>`
     : '<dt>Count</dt><dd>none — nothing attaches here</dd>';
+  const item = f.item;
+  $('#item').hidden = !item;
+  if (item) {
+    $('#item-dl').innerHTML = `<dt>Kind</dt><dd>${esc(item.kind)} · ${esc(item.slot)}</dd><dt>partId</dt><dd>${item.id}</dd><dt>Attach</dt><dd>${esc(item.attach)}${(item.bones || []).length ? ' · ' + item.bones.length + ' joints' : ''}</dd><dt>Textures</dt><dd>${item.textures}</dd><dt>Convention</dt><dd>${item.failed === 0 ? 'adheres' : item.failed + ' of ' + item.checks.length + ' rules failed'}</dd>`;
+    $('#checks').innerHTML = checksHtml(item.checks);
+  }
   const life = f.life;
   $('#life').hidden = !life;
   if (life) $('#life-dl').innerHTML = `<dt>Stage</dt><dd>${esc(life.stage)}</dd><dt>Year</dt><dd>${esc(life.phase)}</dd><dt>Maturity</dt><dd>${(life.maturity * 100).toFixed(0)} %</dd><dt>Branches</dt><dd>${fmt(life.branches)}</dd>` +
@@ -184,6 +191,7 @@ function show() {
 
 const lodUrl = (m, lod) => (lod === 0 ? m.artifact.url : (m.artifact.lods || [])[lod - 1] || m.artifact.url);
 const word = (v) => ({ yes: 'matches', close: 'close', no: 'not it' })[v] || v;
+const checksHtml = (checks) => (checks || []).map((c) => `<li class="${c.ok ? 'ok' : 'bad'}"><b>${esc(c.rule)}</b> ${esc(c.note)}</li>`).join('');
 const trim = (n) => (typeof n === 'number' ? +n.toFixed(4) : n);
 function when(sec) {
   if (!sec) return '';
@@ -198,7 +206,7 @@ function esc(s) {
 
 const pane = $('#vpane');
 const uniforms = { uTime: { value: 0 }, uWind: { value: 0 }, uAmp: { value: 0.25 } };
-let renderer, scene, camera, controls, model, loader, ground, loaded;
+let renderer, scene, camera, controls, model, loader, ground, loaded, skeleton;
 let token = 0;   // one per load, so a slow glb never replaces a newer one
 
 function viewer() {
@@ -280,7 +288,18 @@ function load(m) {
   loader.load(url, (gltf) => {
     if (mine !== token) return;
     if (model) { scene.remove(model); dispose(model); }
+    if (skeleton) { scene.remove(skeleton); skeleton = null; }
     model = gltf.scene;
+    // A skinned item shows its rig on request: the joints a rebind by name
+    // has to find are the thing to look at.
+    let rigged = null;
+    model.traverse((o) => { if (o.isSkinnedMesh && !rigged) rigged = o; });
+    if (rigged) {
+      skeleton = new THREE.SkeletonHelper(model);
+      skeleton.visible = state.bones;
+      scene.add(skeleton);
+    }
+    $('#bones').hidden = !rigged;
     let swayable = 0;
     model.traverse((o) => {
       if (!o.isMesh) return;
@@ -443,6 +462,11 @@ $('#judge').onclick = () => {
   concept(current());
   setTimeout(resize, 60);
 };
+$('#bones').onclick = () => {
+  state.bones = $('#bones').getAttribute('aria-pressed') !== 'true';
+  $('#bones').setAttribute('aria-pressed', String(state.bones));
+  if (skeleton) skeleton.visible = state.bones;
+};
 $('#wind').onclick = () => {
   state.wind = $('#wind').getAttribute('aria-pressed') !== 'true';
   $('#wind').setAttribute('aria-pressed', String(state.wind));
@@ -485,6 +509,9 @@ $('#a-again').onclick = async () => {
 };
 
 function submissionOf(m) {
+  if (m.recipe.package === 'avatar') {
+    return { package: 'avatar', source: m.design, title: m.title, tags: m.tags, style: m.style, codex: m.codex, concept: m.concept };
+  }
   return {
     title: m.title, description: m.description, tags: m.tags, kind: m.kind, style: m.style,
     package: m.recipe.package, export: m.recipe.export, args: m.recipe.args,
@@ -510,7 +537,6 @@ for (const b of $$('#doors button')) b.onclick = () => {
   door = b.dataset.door;
   for (const x of $$('#doors button')) x.setAttribute('aria-pressed', String(x === b));
   for (const d of ['chisel', 'grove', 'avatar']) $('#door-' + d).hidden = d !== door;
-  $('#m-derive').disabled = $('#m-publish').disabled = door === 'avatar';
   msg('');
 };
 
@@ -660,13 +686,47 @@ function groveSubmission() {
 
 const submission = () => (door === 'grove' ? groveSubmission() : chiselSubmission());
 
+// The Avatar door sends a file, not a recipe: the GLB is the body and the
+// words ride in the query, because the manifest inside already carries most
+// of them.
+let glbFile = null;
+const drop = $('.drop');
+$('#a-file').onchange = () => pickFile($('#a-file').files[0]);
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); pickFile(e.dataTransfer.files[0]); };
+function pickFile(f) {
+  glbFile = f || null;
+  $('#a-drop-text').textContent = f ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(2)} MB` : 'Drop a manifested .glb here, or choose one';
+  $('#a-checks').innerHTML = '';
+  msg('');
+}
+async function sendGlb(path) {
+  if (!glbFile) throw new Error('choose a .glb first');
+  const q = new URLSearchParams();
+  for (const [k, id] of [['title', '#a-title'], ['style', '#a-style'], ['tags', '#a-tags'], ['codex', '#a-codex']]) {
+    const v = $(id).value.trim();
+    if (v) q.set(k, v);
+  }
+  const headers = { 'content-type': 'model/gltf-binary' };
+  if (key()) headers.authorization = 'Bearer ' + key();
+  const r = await fetch(path + '?' + q, { method: 'POST', headers, body: glbFile });
+  const text = await r.text();
+  if (!r.ok) {
+    if (r.status === 401) throw new Error('the store refused the key — unlock again');
+    throw new Error(text.slice(0, 300) || ('HTTP ' + r.status));
+  }
+  return JSON.parse(text);
+}
+
 async function run(path, then) {
   if (GATED && !key() && !askKey()) return;
   const foot = $('.maker .foot');
   foot.setAttribute('aria-busy', 'true');
-  msg('the store is running the recipe…');
+  msg(door === 'avatar' ? 'the store is reading the file…' : 'the store is running the recipe…');
   try {
-    const e = await send(path, submission());
+    const e = door === 'avatar' ? await sendGlb(path) : await send(path, submission());
+    if (door === 'avatar' && e.facts && e.facts.item) $('#a-checks').innerHTML = checksHtml(e.facts.item.checks);
     then(e);
   } catch (err) {
     msg(err.message, true);
@@ -678,9 +738,13 @@ async function run(path, then) {
 $('#m-derive').onclick = () => run('/derive', (e) => {
   state.preview = e;
   state.lod = 0;
-  msg('derived — ' + fmt(e.artifact.tris) + ' tris, ' + dims(e.facts.size) + ' m. Nothing is on the shelf yet.');
+  const item = e.facts.item;
+  msg(item
+    ? (item.failed === 0 ? `adheres — ${item.checks.length} rules kept. ` : `${item.failed} of ${item.checks.length} rules failed — see below. `) + fmt(e.artifact.tris) + ' tris, ' + dims(e.facts.size) + ' m.'
+    : 'derived — ' + fmt(e.artifact.tris) + ' tris, ' + dims(e.facts.size) + ' m. Nothing is on the shelf yet.');
   show();
-  $('#maker').close();
+  // A failed check is the point of looking: keep the list in front of you.
+  if (!item || item.failed === 0) $('#maker').close();
   toast('on the table, not on the shelf');
 });
 

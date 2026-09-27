@@ -54,6 +54,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 
+mod avatar;
 mod entry;
 mod library;
 mod page;
@@ -160,6 +161,8 @@ fn seed(data: &PathBuf) {
             sockets: Vec::new(),
             codex: String::new(),
             concept: String::new(),
+            glb: None,
+            source: String::new(),
         };
         match derive(&sub, data) {
             Ok(e) => println!("seeded {} ({})", e.design, e.title),
@@ -218,8 +221,13 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
     // Any POST carries a body; read it once, here, rather than in four places.
     let body: Vec<u8> = if method == "POST" {
         let want: usize = header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
-        if want == 0 || want > 8 * 1024 * 1024 {
-            return respond(&mut stream, head_only, 413, "text/plain", Cache::None, b"bad content-length (max 8MB)").await;
+        // A recipe is kilobytes; a manifested GLB with its textures embedded
+        // is tens of megabytes, and the convention says embed them.
+        let is_glb = header("content-type").is_some_and(|c| c.starts_with("model/gltf-binary"));
+        let cap = if is_glb { 64 * 1024 * 1024 } else { 8 * 1024 * 1024 };
+        if want == 0 || want > cap {
+            return respond(&mut stream, head_only, 413, "text/plain", Cache::None,
+                if is_glb { b"bad content-length (max 64MB for a GLB)" as &[u8] } else { b"bad content-length (max 8MB)" }).await;
         }
         let mut b = buf[head_end..].to_vec();
         while b.len() < want {
@@ -326,9 +334,36 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
             if !authorised() {
                 return respond(&mut stream, head_only, 401, "text/plain", Cache::None, b"bad token").await;
             }
-            let sub = match parse_submission(&body) {
-                Ok(s) => s,
-                Err(msg) => return respond(&mut stream, head_only, 400, "text/plain", Cache::None, msg.as_bytes()).await,
+            // A GLB body is an avatar item; its words come from the manifest,
+            // with the query string allowed to add tags, a style, a codex.
+            let sub = if body.starts_with(b"glTF") {
+                let q = parse_query(&query);
+                let get = |k: &str| q.get(k).cloned().unwrap_or_default();
+                Submission {
+                    title: get("title"),
+                    description: String::new(),
+                    tags: get("tags").split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect(),
+                    kind: String::new(),
+                    style: get("style"),
+                    package: "avatar".into(),
+                    export: String::new(),
+                    args: Vec::new(),
+                    recipe: None,
+                    material: String::new(),
+                    license: if get("license").is_empty() { "CC0-1.0".into() } else { get("license") },
+                    author: get("author"),
+                    origin: "imported".into(),
+                    sockets: Vec::new(),
+                    codex: get("codex"),
+                    concept: get("concept"),
+                    glb: Some(body.clone()),
+                    source: String::new(),
+                }
+            } else {
+                match parse_submission(&body) {
+                    Ok(s) => s,
+                    Err(msg) => return respond(&mut stream, head_only, 400, "text/plain", Cache::None, msg.as_bytes()).await,
+                }
             };
             let shelve = path == "/publish";
             let dir = if shelve { app.data.clone() } else { app.scratch.clone() };

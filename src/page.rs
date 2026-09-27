@@ -130,7 +130,7 @@ pub fn render(entries: &[Entry], current: Option<&Entry>, locked: bool) -> Strin
         h.push_str(&format!("<button data-lod=\"{i}\" aria-pressed=\"{pressed}\"{dis}>LOD{i}</button>"));
     }
     h.push_str("</div>\n");
-    h.push_str("  <div class=\"right\"><button id=\"judge\" aria-pressed=\"false\">Concept beside</button><button id=\"wind\" aria-pressed=\"false\">Wind</button></div>\n </div>\n");
+    h.push_str("  <div class=\"right\"><button id=\"judge\" aria-pressed=\"false\">Concept beside</button><button id=\"bones\" aria-pressed=\"false\" hidden>Bones</button><button id=\"wind\" aria-pressed=\"false\">Wind</button></div>\n </div>\n");
 
     h.push_str(" <div class=\"stage\" id=\"stage\"><div class=\"pane\" id=\"vpane\">");
     if let Some(e) = cur {
@@ -157,6 +157,11 @@ pub fn render(entries: &[Entry], current: Option<&Entry>, locked: bool) -> Strin
         None => (" hidden", String::new()),
     };
     h.push_str(&format!(" <section id=\"life\"{life_hidden}><h3>This moment</h3><dl id=\"life-dl\">{life_dl}</dl></section>\n"));
+    let (item_hidden, item_dl, checks) = match cur.and_then(|e| e.facts.item.as_ref()) {
+        Some(i) => ("", item_dl(i), checks_ul(i)),
+        None => (" hidden", String::new(), String::new()),
+    };
+    h.push_str(&format!(" <section id=\"item\"{item_hidden}><h3>The item</h3><dl id=\"item-dl\">{item_dl}</dl><ul class=\"checks\" id=\"checks\">{checks}</ul></section>\n"));
     h.push_str(" <section><h3>Verdict</h3><div class=\"verdict\" id=\"verdict\"><button data-v=\"yes\">Matches concept</button><button data-v=\"close\">Close, fix noted</button><button data-v=\"no\">Not it</button></div>");
     h.push_str("<textarea id=\"note\" placeholder=\"What is off, in one line. Saved with the design.\"></textarea>");
     h.push_str(&format!("<div class=\"verdict-log\" id=\"verdict-log\">{}</div></section>\n", cur.map(verdict_log).unwrap_or_default()));
@@ -280,6 +285,27 @@ fn recipe_json(e: &Entry) -> String {
     serde_json::to_string_pretty(&v).unwrap_or_default()
 }
 
+fn item_dl(i: &crate::entry::Item) -> String {
+    format!(
+        "<dt>Kind</dt><dd>{} · {}</dd><dt>partId</dt><dd>{}</dd><dt>Attach</dt><dd>{}{}</dd><dt>Textures</dt><dd>{}</dd><dt>Convention</dt><dd>{}</dd>",
+        esc(&i.kind),
+        esc(&i.slot),
+        i.id,
+        esc(&i.attach),
+        if i.bones.is_empty() { String::new() } else { format!(" · {} joints", i.bones.len()) },
+        i.textures,
+        if i.failed == 0 { "adheres".to_string() } else { format!("{} of {} rules failed", i.failed, i.checks.len()) }
+    )
+}
+
+/// Every rule, ticked or crossed — the reason this door exists.
+fn checks_ul(i: &crate::entry::Item) -> String {
+    i.checks
+        .iter()
+        .map(|c| format!("<li class=\"{}\"><b>{}</b> {}</li>", if c.ok { "ok" } else { "bad" }, esc(&c.rule), esc(&c.note)))
+        .collect()
+}
+
 fn life_dl(l: &crate::entry::Life, e: &Entry) -> String {
     let withered = e.recipe.recipe.as_ref().and_then(|r| r.get("withered")).and_then(|v| v.as_bool()).unwrap_or(false);
     format!(
@@ -395,7 +421,15 @@ fn maker() -> String {
   </div>
  </div>
  <div class="door" id="door-avatar" hidden>
-  <div class="soon"><b>Not open yet</b>Avatar makes humanoids, and nothing publishes here until it can be derived the way stone and wood are — from a recipe this store runs itself.<br>The door is here so it is obvious what is missing, not to pretend it works.</div>
+  <p class="note" style="margin:0 0 10px">An avatar part is not derived here — it is made in Unity, or anywhere, and arrives as <b>one GLB that is the whole item</b>: mesh, materials, textures, and its meaning at <code>asset.extras.pixygonItem</code>. The Quarry reads it the way every consumer will, holds it to the Portable Item Convention, measures it, and keeps the bytes exactly as they came.</p>
+  <label class="drop" for="a-file"><input id="a-file" type="file" accept=".glb,model/gltf-binary"><span id="a-drop-text">Drop a manifested .glb here, or choose one</span></label>
+  <div class="grid" style="margin-top:12px">
+   <div class="field"><label for="a-title">Title <span style="text-transform:none;letter-spacing:0">(blank = the manifest's)</span></label><input id="a-title"></div>
+   <div class="field"><label for="a-style">Style</label><input id="a-style" placeholder="lantern-desert"></div>
+   <div class="field"><label for="a-tags">Tags</label><input id="a-tags" placeholder="cloak, veilwalkers"></div>
+   <div class="field"><label for="a-codex">Codex slug <span style="text-transform:none;letter-spacing:0">(blank = the manifest's)</span></label><input id="a-codex"></div>
+  </div>
+  <ul class="checks" id="a-checks"></ul>
  </div>
  <div class="foot">
   <button id="m-derive">Derive &amp; look</button>
@@ -529,6 +563,7 @@ mod tests {
                 collider: "cylinder".into(),
                 sockets: vec![Socket { name: "cap".into(), at: [0.0, 5.2, 0.0], kind: "capital".into(), size: [0.9; 3] }],
                 life: None,
+                item: None,
             },
             preview: format!("/models/{design}.png"),
             license: "CC0-1.0".into(),

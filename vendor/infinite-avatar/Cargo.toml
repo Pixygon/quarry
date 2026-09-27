@@ -1,0 +1,17 @@
+[package]
+# Published to crates.io as `thread-avatar`; the workspace still says
+# `infinite-avatar` via a `package =` alias, so no `use infinite_avatar::…`
+# changes. It implements the published avatar-v0.1 convention, so it belongs
+# in the open half.
+name = "thread-avatar"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pixygon"]
+license = "MIT OR Apache-2.0"
+description = "Portable avatars for the Thread (avatar-v0.1): slots, specs, catalogs and the Portable Item Convention. No rendering."
+repository = "https://github.com/Pixygon/thread-engine"
+
+[dependencies]
+thread-id = { package = "thread-structured-id", path = "../thread-id" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

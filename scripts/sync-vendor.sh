@@ -7,7 +7,7 @@
 set -euo pipefail
 SRC="${1:-$HOME/repos/thread-engine}"
 DST="$(cd "$(dirname "$0")/.." && pwd)/vendor"
-for c in thread-id infinite-manifest weft chisel grove; do
+for c in thread-id infinite-manifest weft chisel grove infinite-avatar; do
   rm -rf "$DST/$c"
   mkdir -p "$DST/$c"
   cp -r "$SRC/crates/$c/src" "$DST/$c/src"
@@ -29,8 +29,9 @@ paths = {
     "weft": '{ package = "weft-lang", path = "../weft" }',
     "chisel": '{ package = "thread-chisel", path = "../chisel" }',
     "grove": '{ package = "thread-grove", path = "../grove" }',
+    "infinite-avatar": '{ package = "thread-avatar", path = "../infinite-avatar" }',
 }
-for crate in ["thread-id", "infinite-manifest", "weft", "chisel", "grove"]:
+for crate in ["thread-id", "infinite-manifest", "weft", "chisel", "grove", "infinite-avatar"]:
     p = dst / crate / "Cargo.toml"
     out, in_dev = [], False
     for line in p.read_text().splitlines():

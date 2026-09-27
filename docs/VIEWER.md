@@ -39,7 +39,15 @@ A **Make** button on the shelf opens a maker with three doors:
   the rules in a form (with the JSON beside), a seed field, derive, see it,
   publish. The Grove session is adding species / seed / clock; leave room
   for an age and a season control.
-- **Avatar** — nothing publishes here yet; show the door and say so.
+- **Avatar** — *as built 2026-09-27:* `thread-avatar` is a data model
+  (slots, specs, races) with a renderer seam and no mesh derivation, and the
+  live `/v1/avatar/assets` library holds nothing — so this door is not
+  "recipe in, mesh out". It takes the convention's own unit of exchange, a
+  **manifested GLB** (`asset.extras.pixygonItem`), and is the convention's
+  checker: every GLB rule in `pixygon-packages/@pixygon/avatar/CONVENTION.md`
+  as a ticked or crossed line, facts measured off the file, bytes kept as
+  they came, design = sha256 of the file. Composing a spec into a dressed
+  body waits for a body with the shared skeleton to exist.
 
 Deriving is the existing `POST /publish`, gated by `QUARRY_TOKEN`; a
 "derive without storing" route (`POST /derive` → glb + facts, nothing kept)

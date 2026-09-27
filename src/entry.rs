@@ -61,6 +61,14 @@ pub struct Submission {
     /// gallery link is public, the entity behind it is not.
     #[serde(default)]
     pub concept: String,
+    /// For `package: "avatar"`: the manifested GLB itself. It arrives as the
+    /// request body, never as JSON, so serde does not see it.
+    #[serde(skip)]
+    pub glb: Option<Vec<u8>>,
+    /// For `package: "avatar"` without a body: re-check the GLB already on
+    /// the shelf under this design (what Republish sends).
+    #[serde(default)]
+    pub source: String,
 }
 
 fn weft_model() -> String {
@@ -146,6 +154,30 @@ pub struct Facts {
     /// at this moment. Measured by the grower, like everything else here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub life: Option<Life>,
+    /// Avatar items only: what the file says it is, what the file actually
+    /// contains, and how it did against the Portable Item Convention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<Item>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Item {
+    /// partId — the shared key between Unity, the web and a saved avatar.
+    pub id: u32,
+    /// `garment` · `weapon` · `body` · `part` · `consumable`.
+    pub kind: String,
+    pub slot: String,
+    /// `skinned` · `bone`, measured off the file.
+    pub attach: String,
+    /// Joint names, in joint order — what a rebind by name must match.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bones: Vec<String>,
+    pub skins: usize,
+    pub textures: usize,
+    /// Every rule of the convention, and how the file did.
+    pub checks: Vec<crate::avatar::Check>,
+    /// How many of them failed. Zero is what "adheres" means.
+    pub failed: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -257,7 +289,9 @@ fn sweep(scratch: &Path, keep: usize) {
 }
 
 fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, String> {
-    if sub.title.trim().is_empty() {
+    // An avatar item names itself in its manifest; everything else must be
+    // told what it is called.
+    if sub.title.trim().is_empty() && sub.package != "avatar" {
         return Err("a model needs a title".into());
     }
     // Two suppliers so far: the built-in Weft modelling library (carved,
@@ -265,6 +299,9 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
     // wpm packages come later. Sockets are MEASURED where the recipe yields
     // them (a grown tree ends in tips); declared ones are kept otherwise.
     let mut life: Option<Life> = None;
+    let mut item: Option<Item> = None;
+    let mut original: Option<Vec<u8>> = None;
+    let mut manifest: Option<serde_json::Value> = None;
     let (built, sockets, lod_models): (chisel::model::Built, Vec<Socket>, Vec<chisel::model::Built>) =
         match sub.package.as_str() {
             "weft-model" => {
@@ -298,11 +335,43 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
                 });
                 (grown.built, sockets, grown.lods)
             }
+            "avatar" => {
+                // Not derived: checked. The file is the item, the convention
+                // is the recipe it has to keep, and the bytes are stored
+                // exactly as they came — a consumer must get the same file
+                // the maker saw.
+                let bytes = match (&sub.glb, sub.source.is_empty()) {
+                    (Some(b), _) => b.clone(),
+                    (None, false) => std::fs::read(dir.join(format!("{}.glb", sub.source)))
+                        .map_err(|_| format!("no GLB on the shelf under design {}", sub.source))?,
+                    (None, true) => return Err("an avatar submission is a manifested GLB — send the file as the body (content-type model/gltf-binary)".into()),
+                };
+                let checked = crate::avatar::check(&bytes)?;
+                let m = &checked.manifest;
+                let failed = checked.checks.iter().filter(|c| !c.ok).count();
+                item = Some(Item {
+                    id: m.id,
+                    kind: kind_name(m.kind),
+                    slot: m.slot.clone(),
+                    attach: checked.attach.clone(),
+                    bones: checked.bones.clone(),
+                    skins: checked.skins,
+                    textures: checked.textures,
+                    checks: checked.checks.clone(),
+                    failed,
+                });
+                original = Some(bytes);
+                manifest = Some(serde_json::to_value(m).unwrap_or_default());
+                (checked.built, Vec::new(), Vec::new())
+            }
             other => {
-                return Err(format!("unknown package '{other}' — 'weft-model' and 'grove' are available in this Quarry"));
+                return Err(format!("unknown package '{other}' — 'weft-model', 'grove' and 'avatar' are available in this Quarry"));
             }
         };
-    let glb = chisel::model::export_glb(&built)?;
+    let glb = match original {
+        Some(bytes) => bytes,
+        None => chisel::model::export_glb(&built)?,
+    };
 
     let design = design_id(sub);
     std::fs::write(dir.join(format!("{design}.glb")), &glb)
@@ -333,15 +402,26 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
         }
         before.as_ref().map(|e| old(e).clone()).unwrap_or_default()
     };
+    let m_str = |k: &str| manifest.as_ref().and_then(|m| m.get(k)).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut tags = sub.tags.clone();
+    if item.is_some() {
+        for t in [m_str("kind"), m_str("slot").to_lowercase(), "avatar".into()] {
+            if !t.is_empty() && !tags.contains(&t) {
+                tags.push(t);
+            }
+        }
+    }
     let entry = Entry {
         design: design.clone(),
-        title: sub.title.clone(),
-        description: sub.description.clone(),
-        tags: sub.tags.clone(),
+        title: if !sub.title.trim().is_empty() { sub.title.clone() } else { m_str("title") },
+        description: if !sub.description.is_empty() { sub.description.clone() } else { m_str("description") },
+        tags,
         kind: if !sub.kind.is_empty() {
             sub.kind.clone()
         } else if sub.package == "grove" {
             "tree".into()
+        } else if item.is_some() {
+            m_str("kind")
         } else {
             sub.export.clone()
         },
@@ -351,7 +431,7 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
             export: sub.export.clone(),
             args: sub.args.clone(),
             material: sub.material.clone(),
-            recipe: canonical_recipe(sub),
+            recipe: if item.is_some() { manifest.clone() } else { canonical_recipe(sub) },
         },
         artifact: Artifact {
             url: format!("{url}/{design}.glb"),
@@ -371,13 +451,19 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
             collider: collider_for(size, &sub.kind),
             sockets,
             life,
+            item,
         },
         preview: format!("{url}/{design}.png"),
         license: sub.license.clone(),
         author: sub.author.clone(),
         origin: sub.origin.clone(),
         supplier: supplier_of(&sub.package).to_string(),
-        codex: kept(&sub.codex, |e| &e.codex),
+        // The manifest names the Codex entry the item IS; that is the concept
+        // to judge it against unless somebody attached a different one.
+        codex: {
+            let c = kept(&sub.codex, |e| &e.codex);
+            if c.is_empty() { m_str("codexSlug") } else { c }
+        },
         concept: kept(&sub.concept, |e| &e.concept),
         verdicts: before.as_ref().map(|e| e.verdicts.clone()).unwrap_or_default(),
         derived_at: now(),
@@ -408,6 +494,15 @@ fn collider_for(size: [f32; 3], kind: &str) -> String {
 /// The design id: a hash of the recipe alone. Same recipe → same design, no
 /// matter who published it or what they called it.
 fn design_id(sub: &Submission) -> String {
+    // An item has no recipe but the file; the same bytes are the same design.
+    if sub.package == "avatar" {
+        if let Some(b) = &sub.glb {
+            return sha256_hex(b)[..16].to_string();
+        }
+        if !sub.source.is_empty() {
+            return sub.source.clone();
+        }
+    }
     let mut canonical = serde_json::json!({
         "package": sub.package,
         "export": sub.export,
@@ -627,6 +722,8 @@ mod tests {
             sockets: Vec::new(),
             codex: String::new(),
             concept: String::new(),
+            glb: None,
+            source: String::new(),
         }
     }
 

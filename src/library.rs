@@ -114,7 +114,7 @@ pub fn catalog() -> Value {
     // Grove's door is not a list of shapes — a tree is one recipe with many
     // rules. The blank is the grower's own default, serialised here, so the
     // form gains a field the day the grower gains a rule.
-    let blank = serde_json::to_value(grove::GrowRecipe::default()).unwrap_or_else(|_| json!({}));
+    let blank = grove::Planting::default().to_value();
 
     json!({
         "package": "weft-model",

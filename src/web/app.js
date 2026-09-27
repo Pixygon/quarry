@@ -145,9 +145,15 @@ function show() {
   $('#recipe-json').textContent = JSON.stringify(r.recipe || { export: r.export, args: r.args, material: r.material }, null, 1);
 
   const sk = f.sockets || [];
+  const byKind = {};
+  for (const x of sk) byKind[x.kind] = (byKind[x.kind] || 0) + 1;
   $('#sockets').innerHTML = sk.length
-    ? `<dt>Count</dt><dd>${sk.length}</dd><dt>Kinds</dt><dd>${esc([...new Set(sk.map((x) => x.kind))].join(', ') || '—')}</dd><dt>First</dt><dd>${esc(sk[0].name)} @ ${sk[0].at.map((v) => v.toFixed(2)).join(', ')}</dd>`
+    ? `<dt>Count</dt><dd>${sk.length}</dd><dt>Kinds</dt><dd>${esc(Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(' · ') || '—')}</dd><dt>First</dt><dd>${esc(sk[0].name)} @ ${sk[0].at.map((v) => v.toFixed(2)).join(', ')}</dd>`
     : '<dt>Count</dt><dd>none — nothing attaches here</dd>';
+  const life = f.life;
+  $('#life').hidden = !life;
+  if (life) $('#life-dl').innerHTML = `<dt>Stage</dt><dd>${esc(life.stage)}</dd><dt>Year</dt><dd>${esc(life.phase)}</dd><dt>Maturity</dt><dd>${(life.maturity * 100).toFixed(0)} %</dd><dt>Branches</dt><dd>${fmt(life.branches)}</dd>` +
+    ((r.recipe || {}).withered ? '<dt>State</dt><dd>withered</dd>' : '');
 
   const last = (m.verdicts || [])[(m.verdicts || []).length - 1];
   for (const b of $$('#verdict button')) {
@@ -561,8 +567,12 @@ const GROVE_HELP = {
   angle: 'branch angle °', length: 'child length ×', child_radius: 'child radius ×',
   curve: 'branch bend °', gravity: 'gravity', wobble: 'wobble', taper: 'taper',
   sprout_from: 'sprout from', sway: 'sway', emissive: 'glow',
-  sides: 'ring sides', segments: 'segments', lods: 'lod detail ×',
+  seasons_to_grown: 'seasons to grown', sprout_size: 'sprout size ×', seasons_of_life: 'seasons of life',
+  evergreen: 'evergreen', sides: 'ring sides', segments: 'segments', lods: 'lod detail ×',
 };
+// The planting's own fields — the individual, the moment, what happened to
+// it — have their own controls above the rules and are kept out of the grid.
+const PLANTING = ['seed', 'age', 'season', 'withered', 'cut', 'taken', 'clock', 'state'];
 
 // f32 through f64 prints 0.550000011920929. Show the number a person typed,
 // and only write it back when they actually touch the field — rounding an
@@ -586,20 +596,37 @@ function groveDoor() {
     catch (e) { msg('the recipe is not valid JSON yet', true); }
   };
   $('#g-seed').oninput = () => { recipe.seed = Math.max(0, parseInt($('#g-seed').value, 10) || 0); groveForm(); };
+  // The clock. Age blank = the whole potential plant, the grower's meaning
+  // of "no age"; season wraps 0..1 through bud, leaf, bloom, fruit, seed
+  // drop and bare.
+  $('#g-age').oninput = () => {
+    const v = parseFloat($('#g-age').value);
+    if (Number.isFinite(v) && v >= 0) recipe.age = v; else delete recipe.age;
+    groveForm();
+  };
+  $('#g-season').onchange = () => { recipe.season = parseFloat($('#g-season').value); groveForm(); };
+  $('#g-withered').onchange = () => { if ($('#g-withered').checked) recipe.withered = true; else delete recipe.withered; groveForm(); };
 }
+
+const SEASONS = [[0.05, 'bud'], [0.2, 'leaf'], [0.35, 'bloom'], [0.55, 'fruit'], [0.75, 'seed drop'], [0.92, 'bare']];
 
 function groveForm(fromJson) {
   const blank = LIB.grove.blank;
-  const keys = Object.keys(GROVE_HELP).filter((k) => k in blank);
+  const keys = Object.keys(GROVE_HELP).filter((k) => k in blank && !PLANTING.includes(k));
   $('#grove-args').innerHTML = keys.map((k) => {
     const v = recipe[k] ?? blank[k];
     const arr = Array.isArray(v);
+    if (typeof v === 'boolean') {
+      return `<div class="field"><label for="ga-${k}">${esc(GROVE_HELP[k])}</label><input id="ga-${k}" data-k="${k}" type="checkbox" ${v ? 'checked' : ''}></div>`;
+    }
     const val = arr ? v.map(tidy).join(', ') : tidy(v);
     return `<div class="field"><label for="ga-${k}">${esc(GROVE_HELP[k])}</label><input id="ga-${k}" data-k="${k}" data-arr="${arr}" ${arr || typeof v === 'string' ? '' : 'type="number" step="any"'} value="${esc(val)}"></div>`;
   }).join('');
   for (const i of $$('#grove-args input')) i.oninput = () => {
     const k = i.dataset.k;
-    if (i.dataset.arr === 'true') {
+    if (i.type === 'checkbox') {
+      recipe[k] = i.checked;
+    } else if (i.dataset.arr === 'true') {
       recipe[k] = i.value.split(',').map((x) => parseFloat(x)).filter((x) => Number.isFinite(x));
     } else if (typeof (recipe[k] ?? LIB.grove.blank[k]) === 'string') {
       recipe[k] = i.value;
@@ -609,7 +636,13 @@ function groveForm(fromJson) {
     }
     $('#g-json').value = JSON.stringify(recipe, null, 1);
   };
-  $('#g-seed').value = recipe.seed ?? 0;
+  $('#g-seed').value = recipe.seed ?? blank.seed ?? 1;
+  $('#g-age').value = recipe.age ?? '';
+  const season = recipe.season ?? blank.season ?? 0.35;
+  $('#g-season').innerHTML = SEASONS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('') +
+    (SEASONS.some(([v]) => Math.abs(v - season) < 0.001) ? '' : `<option value="${season}">${season.toFixed(2)} (as written)</option>`);
+  $('#g-season').value = String(SEASONS.find(([v]) => Math.abs(v - season) < 0.001)?.[0] ?? season);
+  $('#g-withered').checked = !!recipe.withered;
   if (!fromJson) $('#g-json').value = JSON.stringify(recipe, null, 1);
 }
 

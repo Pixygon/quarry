@@ -9,12 +9,28 @@
 //!
 //! The recipe is rules: leaves per tip, how far back along the twig, size,
 //! how wide the cluster fans, how much it droops, its colours base→tip (in
-//! vertex colour, which every PBR renderer multiplies into albedo). One seed,
-//! one crown, everywhere. Coarser LODs thin the count and keep the silhouette.
+//! vertex colour, which every PBR renderer multiplies into albedo).
+//!
+//! Every cluster carries a **key** — the twig's identity, not its position in
+//! a list — and each leaf is [addressed](crate::rand) on it. So one seed grows
+//! one crown, everywhere: a coarser LOD thins the count and the leaves that
+//! remain are the very same leaves, and a sapling's crown is the crown its
+//! grown self will have on the twigs it already has.
 use infinite_manifest::texture::TextureRecipe;
 use serde::{Deserialize, Serialize};
 
 use chisel::MeshData;
+
+use crate::rand::Rnd;
+
+/// Slots per leaf on its cluster's key: which way it points, how far it tilts,
+/// how big it is, how it is rolled. A stride, so leaf 9 keeps its address
+/// whether the cluster grows eight leaves or eighty.
+const PER_LEAF: u32 = 4;
+const SLOT_AROUND: u32 = 0;
+const SLOT_TILT: u32 = 1;
+const SLOT_SIZE: u32 = 2;
+const SLOT_ROLL: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -30,7 +46,8 @@ pub struct LeafRecipe {
     /// twigs only; 2 = the branches they grow from as well, along their
     /// length). A full crown is 2; a sparse or young one is 1.
     pub depth: u32,
-    /// Leaf length and width in metres.
+    /// Leaf length and width in metres. A leaf is its own size from the start —
+    /// a sapling's leaves are not miniatures — so this does not scale with age.
     pub length: f32,
     pub width: f32,
     /// Fold across the midrib, metres the centre rises.
@@ -45,6 +62,9 @@ pub struct LeafRecipe {
     /// vertex colour so it costs no texture.
     pub color: [f32; 4],
     pub color_tip: [f32; 4],
+    /// What the leaves turn before they drop. The year mixes towards it, so
+    /// autumn costs no texture either.
+    pub color_autumn: [f32; 4],
     /// Optional surface recipe (veins, speckle); absent = flat colour.
     pub texture: Option<TextureRecipe>,
     pub emissive: f32,
@@ -67,6 +87,7 @@ impl Default for LeafRecipe {
             jitter: 0.3,
             color: [0.16, 0.36, 0.12, 1.0],
             color_tip: [0.42, 0.62, 0.2, 1.0],
+            color_autumn: [0.72, 0.44, 0.11, 1.0],
             texture: None,
             emissive: 0.0,
             sway: 0.25,
@@ -74,23 +95,44 @@ impl Default for LeafRecipe {
     }
 }
 
+impl LeafRecipe {
+    /// The same recipe with the leaves `t` of the way turned — 0 is green, 1
+    /// is the autumn colour. The tip turns a shade brighter than the base, so
+    /// a turned crown keeps the gradient a green one has.
+    pub fn turned(&self, t: f32) -> LeafRecipe {
+        let t = t.clamp(0.0, 1.0);
+        if t <= 0.0 {
+            return self.clone();
+        }
+        let mix = |a: [f32; 4], b: [f32; 4], lift: f32| -> [f32; 4] {
+            let m = |x: f32, y: f32| x + ((y * lift).min(1.0) - x) * t;
+            [m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2]), a[3]]
+        };
+        LeafRecipe {
+            color: mix(self.color, self.color_autumn, 1.0),
+            color_tip: mix(self.color_tip, self.color_autumn, 1.18),
+            ..self.clone()
+        }
+    }
+}
+
 /// Where a cluster grows: a point on a twig, the twig's direction there, and
 /// how much that spot already sways.
 pub struct LeafSite {
+    /// The cluster's identity — hashed from the twig it grows on, so this
+    /// cluster's leaves are the same leaves at every age and every LOD.
+    pub key: u32,
+    /// The twig itself, which every leaf vertex names in `TEXCOORD_1`: a
+    /// swing through the crown hits the branch the leaves belong to.
+    pub branch: u32,
     pub position: [f32; 3],
     pub direction: [f32; 3],
     pub sway: f32,
-    /// How many leaves this site carries (tips carry `per_tip`, along-sites fewer).
+    /// How many leaves this site carries (tips carry `per_tip`, along-sites
+    /// fewer). Zero is a real answer — a bare twig in winter.
     pub count: u32,
 }
 
-fn rnd(state: &mut u32) -> f32 {
-    *state = state.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
-    let mut x = *state;
-    x = ((x >> ((x >> 28).wrapping_add(4))) ^ x).wrapping_mul(277_803_737);
-    x = (x >> 22) ^ x;
-    (x as f32) / (u32::MAX as f32)
-}
 fn norm(v: [f32; 3]) -> [f32; 3] {
     let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
     [v[0] / l, v[1] / l, v[2] / l]
@@ -123,33 +165,40 @@ fn perp(d: [f32; 3]) -> [f32; 3] {
 }
 
 /// Grow every leaf into one mesh. `detail` thins the count for coarser LODs
-/// (never below one leaf per site) and `seed` keeps the crown the same.
+/// (never below one leaf per site) and `seed`, with each site's key, keeps the
+/// crown the same.
 pub fn leaves(sites: &[LeafSite], r: &LeafRecipe, detail: f32, seed: u32) -> MeshData {
     let mut m = MeshData::default();
-    let mut rng = seed.wrapping_mul(1_597_334_677).wrapping_add(101);
     let spread = r.spread.to_radians();
     for site in sites {
+        let rnd = Rnd::new(seed, site.key);
+        // A site the caller asked for nothing at grows nothing; one it asked
+        // for leaves at keeps at least one however coarse the LOD.
+        if site.count == 0 {
+            continue;
+        }
         let n = ((site.count as f32 * detail).round() as u32).max(1);
         let d = norm(site.direction);
         let side0 = perp(d);
-        for _ in 0..n {
+        for i in 0..n {
+            let slot = i * PER_LEAF;
             // Direction: inside the cone around the twig, then pulled down by droop.
-            let around = rnd(&mut rng) * std::f32::consts::TAU;
-            let tilt = spread * rnd(&mut rng).sqrt();
+            let around = rnd.at(slot + SLOT_AROUND) * std::f32::consts::TAU;
+            let tilt = spread * rnd.at(slot + SLOT_TILT).sqrt();
             let side = rotate(side0, d, around);
             let mut axis = norm(add(scale(d, tilt.cos()), scale(side, tilt.sin())));
             if r.droop > 0.0 {
                 axis = norm(add(scale(axis, 1.0 - r.droop), scale([0.0, -1.0, 0.0], r.droop)));
             }
-            let s = 1.0 + (rnd(&mut rng) * 2.0 - 1.0) * r.jitter;
+            let s = 1.0 + rnd.signed(slot + SLOT_SIZE) * r.jitter;
             let len = r.length * s;
             let wid = r.width * s;
             // Leaf frame: axis along the midrib, `flat` across it, `up` out of the blade.
-            let roll = rnd(&mut rng) * std::f32::consts::TAU;
+            let roll = rnd.at(slot + SLOT_ROLL) * std::f32::consts::TAU;
             let flat = rotate(perp(axis), axis, roll);
             let up = norm(cross(axis, flat));
             let sway = (site.sway + r.sway).clamp(0.0, 1.0);
-            leaf(&mut m, site.position, axis, flat, up, len, wid, r.fold * s, r.color, r.color_tip, sway);
+            leaf(&mut m, site.position, axis, flat, up, len, wid, r.fold * s, r.color, r.color_tip, sway, site.branch);
         }
     }
     m
@@ -169,6 +218,7 @@ fn leaf(
     c0: [f32; 4],
     c1: [f32; 4],
     sway: f32,
+    branch: u32,
 ) {
     let mid = add(base, scale(axis, len * 0.45));
     let pts = [
@@ -192,6 +242,7 @@ fn leaf(
         m.positions.push(pts[k]);
         m.normals.push(n);
         m.uvs.push(uvs[k]);
+        m.uv2.push(crate::grow::branch_uv(branch));
         m.tangents.push(tangent);
         let t = tints[k];
         m.colors.push([

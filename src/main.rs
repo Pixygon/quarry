@@ -106,24 +106,43 @@ async fn main() {
 
 /// A shelf worth arriving at: derive a starter set from the built-in library
 /// so the first visitor finds stock, not an empty room.
+const STARTERS: &[(&str, &str, &[f32], &str, &[&str])] = &[
+    ("Doric column, 5.2 m", "column", &[5.2, 0.44], "marble",
+     &["column", "classical", "load-bearing"]),
+    ("Stone column, 3.6 m", "column", &[3.6, 0.36], "granite",
+     &["column", "classical", "load-bearing"]),
+    ("Stair flight, 12 steps", "stairs", &[12.0, 0.18, 0.28, 1.2], "granite",
+     &["stairs", "circulation"]),
+    ("Stone arch, 3 × 4 m", "arch", &[3.0, 4.0, 0.6], "sandstone",
+     &["arch", "threshold", "doorway"]),
+    ("Amphora", "amphora", &[1.2], "", &["vessel", "prop", "classical"]),
+    ("Terracotta vase", "vase", &[0.9, 0.3, 0.12], "terracotta",
+     &["vessel", "prop"]),
+    ("Oak table", "table", &[1.6, 0.9, 0.75], "wood", &["furniture", "table"]),
+    ("Field boulder", "rock", &[0.8, 3.0], "granite", &["rock", "nature", "scatter"]),
+    ("Stone bowl", "bowl", &[0.5, 0.06], "granite", &["vessel", "prop"]),
+];
+
+/// The ids the starters have carried on quarry.pixygon.io since the shelf
+/// was first seeded (2026-09-25). A test holds the canonical form to these:
+/// move one and nine published designs become orphans.
+#[cfg(test)]
+pub fn starters_pinned() -> Vec<(&'static str, &'static [f32], &'static str, &'static str)> {
+    vec![
+        ("column", &[5.2, 0.44], "marble", "5e41fec7b0ce3898"),
+        ("column", &[3.6, 0.36], "granite", "3ecde3178de1066a"),
+        ("stairs", &[12.0, 0.18, 0.28, 1.2], "granite", "7d225db1e5b4ff0d"),
+        ("arch", &[3.0, 4.0, 0.6], "sandstone", "b4509a9ba0dee026"),
+        ("amphora", &[1.2], "", "55e84461f295b569"),
+        ("vase", &[0.9, 0.3, 0.12], "terracotta", "0c20a90c4f7dee65"),
+        ("table", &[1.6, 0.9, 0.75], "wood", "94a7a6168043098f"),
+        ("rock", &[0.8, 3.0], "granite", "7085cfb3aae497f9"),
+        ("bowl", &[0.5, 0.06], "granite", "d94d6155bb7bf4f7"),
+    ]
+}
+
 fn seed(data: &PathBuf) {
-    let starters: &[(&str, &str, &[f32], &str, &[&str])] = &[
-        ("Doric column, 5.2 m", "column", &[5.2, 0.44], "marble",
-         &["column", "classical", "load-bearing"]),
-        ("Stone column, 3.6 m", "column", &[3.6, 0.36], "granite",
-         &["column", "classical", "load-bearing"]),
-        ("Stair flight, 12 steps", "stairs", &[12.0, 0.18, 0.28, 1.2], "granite",
-         &["stairs", "circulation"]),
-        ("Stone arch, 3 × 4 m", "arch", &[3.0, 4.0, 0.6], "sandstone",
-         &["arch", "threshold", "doorway"]),
-        ("Amphora", "amphora", &[1.2], "", &["vessel", "prop", "classical"]),
-        ("Terracotta vase", "vase", &[0.9, 0.3, 0.12], "terracotta",
-         &["vessel", "prop"]),
-        ("Oak table", "table", &[1.6, 0.9, 0.75], "wood", &["furniture", "table"]),
-        ("Field boulder", "rock", &[0.8, 3.0], "granite", &["rock", "nature", "scatter"]),
-        ("Stone bowl", "bowl", &[0.5, 0.06], "granite", &["vessel", "prop"]),
-    ];
-    for (title, export, args, material, tags) in starters {
+    for (title, export, args, material, tags) in STARTERS {
         let sub = Submission {
             title: title.to_string(),
             description: String::new(),

@@ -142,6 +142,31 @@ pub struct Facts {
     pub collider: String,
     #[serde(default)]
     pub sockets: Vec<Socket>,
+    /// Grown things only: where in its life and its year the plant stands
+    /// at this moment. Measured by the grower, like everything else here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub life: Option<Life>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Life {
+    /// `sapling` · `mature` · `old` · `dying`.
+    pub stage: String,
+    /// `bud` · `leaf` · `bloom` · `fruit` · `seeddrop` · `bare`.
+    pub phase: String,
+    /// 0..1 — at 1 it is the whole potential plant the seed decided.
+    pub maturity: f32,
+    /// How many branches it has at this moment.
+    pub branches: usize,
+}
+
+/// A grower enum as the entry spells it: the lowercase serde name, which is
+/// the one a client would type back.
+fn kind_name<T: Serialize>(k: T) -> String {
+    serde_json::to_value(k)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -239,6 +264,7 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
     // inorganic) and Grove (grown: trees and what hangs on them). Third-party
     // wpm packages come later. Sockets are MEASURED where the recipe yields
     // them (a grown tree ends in tips); declared ones are kept otherwise.
+    let mut life: Option<Life> = None;
     let (built, sockets, lod_models): (chisel::model::Built, Vec<Socket>, Vec<chisel::model::Built>) =
         match sub.package.as_str() {
             "weft-model" => {
@@ -248,15 +274,28 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
                 (chisel::model::build(&model)?, sub.sockets.clone(), Vec::new())
             }
             "grove" => {
+                // A plant is a species, a seed and a clock — one flat object
+                // in the submission, exactly as a `.grow.json` spells it. The
+                // grower reads it; the Quarry does not second-guess the shape.
                 let value = sub.recipe.clone().ok_or("a grove submission carries its grow recipe in `recipe`")?;
-                let recipe: grove::GrowRecipe =
-                    serde_json::from_value(value).map_err(|e| format!("not a grow recipe: {e}"))?;
-                let grown = grove::grow(&recipe)?;
+                let planting = grove::Planting::from_value(&value)?;
+                let grown = grove::grow_planting(&planting)?;
                 let sockets = grown
                     .sockets
                     .iter()
-                    .map(|s| Socket { name: s.name.clone(), at: s.position, kind: "tip".into(), size: [s.radius * 2.0; 3] })
+                    .map(|s| Socket {
+                        name: s.name.clone(),
+                        at: s.position,
+                        kind: kind_name(s.kind),
+                        size: [s.radius * 2.0; 3],
+                    })
                     .collect();
+                life = Some(Life {
+                    stage: kind_name(grown.stage),
+                    phase: kind_name(grown.phase),
+                    maturity: grown.maturity,
+                    branches: grown.branches.len(),
+                });
                 (grown.built, sockets, grown.lods)
             }
             other => {
@@ -331,6 +370,7 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
             materials: built.parts.iter().map(|p| p.name.clone()).collect(),
             collider: collider_for(size, &sub.kind),
             sockets,
+            life,
         },
         preview: format!("{url}/{design}.png"),
         license: sub.license.clone(),
@@ -388,19 +428,75 @@ fn canonical_recipe(sub: &Submission) -> Option<serde_json::Value> {
     if sub.package != "grove" {
         return None;
     }
-    let r: grove::GrowRecipe = serde_json::from_value(sub.recipe.clone()?).ok()?;
-    let mut full = serde_json::to_value(r).ok()?;
-    let defaults = serde_json::to_value(grove::GrowRecipe::default()).ok()?;
-    if let (Some(obj), Some(def)) = (full.as_object_mut(), defaults.as_object()) {
-        obj.retain(|k, v| def.get(k) != Some(v));
+    // The grower's own flat spelling — species fields, `seed`, `age`,
+    // `season`, and the state — stripped of everything a blank planting
+    // already says. `seed` and `age` stay in when they are set, because a
+    // different individual or a sapling IS a different design; a field the
+    // grower gained yesterday, left at its default, is not.
+    let p = grove::Planting::from_value(sub.recipe.as_ref()?).ok()?;
+    let full = strip_blank(canonical_numbers(p.to_value()));
+    let defaults = strip_blank(canonical_numbers(grove::Planting::default().to_value()));
+    let (Some(mut obj), Some(def)) = (full.as_object().cloned(), defaults.as_object()) else {
+        return Some(full);
+    };
+    obj.retain(|k, v| def.get(k) != Some(v));
+    Some(serde_json::Value::Object(obj))
+}
+
+/// The recipes a species carries INSIDE it — leaves, the wither curve, the
+/// crops — each stripped of what its own blank says. The top-level strip
+/// cannot see into them: on 2026-09-27 `LeafRecipe` gained `color_autumn`
+/// with a default, and every design with leaves forked, because `leaves` was
+/// compared as one whole object against `null`. Same lesson, one level down.
+///
+/// `bark` is not here: `TextureRecipe` (thread-manifest) has no `Default`,
+/// so a field added to it is a field every old recipe must spell out, and an
+/// old recipe fails to parse rather than silently changing its name.
+fn strip_blank(mut v: serde_json::Value) -> serde_json::Value {
+    let blanks: [(&str, serde_json::Value); 4] = [
+        ("leaves", serde_json::to_value(grove::LeafRecipe::default()).unwrap_or_default()),
+        ("wither", serde_json::to_value(grove::WitherRecipe::default()).unwrap_or_default()),
+        ("blooms", serde_json::to_value(grove::CropRecipe::default()).unwrap_or_default()),
+        ("fruit", serde_json::to_value(grove::CropRecipe::default()).unwrap_or_default()),
+    ];
+    if let Some(obj) = v.as_object_mut() {
+        for (key, blank) in blanks {
+            let blank = canonical_numbers(blank);
+            if let (Some(serde_json::Value::Object(inner)), Some(b)) = (obj.get_mut(key), blank.as_object()) {
+                inner.retain(|k, x| b.get(k) != Some(x));
+            }
+        }
     }
-    Some(full)
+    v
+}
+
+/// Every number in a value, rounded to six decimals — recursively, because
+/// the noise lives in nested arrays too. The oak's bark colour `0.11` came
+/// out of one build as `0.10999999940395357` and out of the next as
+/// `…355`, and the design changed its name over nothing.
+fn canonical_numbers(v: serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Number(_) => canonical_number(&v),
+        serde_json::Value::Array(a) => serde_json::Value::Array(a.into_iter().map(canonical_numbers).collect()),
+        serde_json::Value::Object(o) => {
+            serde_json::Value::Object(o.into_iter().map(|(k, x)| (k, canonical_numbers(x))).collect())
+        }
+        other => other,
+    }
 }
 
 /// Float noise must not fork a design: 5.200000001 and 5.2 are one thing.
+/// Six decimals — an f32 carries about seven significant digits, so its
+/// noise sits below this and a recipe's real values (metres, degrees,
+/// colour channels) sit well above it.
 fn canonical_number(v: &serde_json::Value) -> serde_json::Value {
+    // An integer is exact and stays one: `seed: 7` must not become `7.0`,
+    // which is a different string and therefore a different design.
+    if v.is_i64() || v.is_u64() {
+        return v.clone();
+    }
     match v.as_f64() {
-        Some(f) => serde_json::json!((f * 10_000.0).round() / 10_000.0),
+        Some(f) => serde_json::json!((f * 1_000_000.0).round() / 1_000_000.0),
         None => v.clone(),
     }
 }
@@ -585,6 +681,109 @@ mod tests {
         let obj = canon.as_object().expect("an object");
         assert!(obj.contains_key("height"), "a set rule is kept");
         assert!(!obj.contains_key("taper"), "a defaulted rule is dropped: {obj:?}");
+    }
+
+    /// The nine carved starters have had these ids on the live store since
+    /// the shelf was first seeded. A change to how numbers are canonicalised
+    /// that moves ANY of them is a change that orphans nine designs.
+    #[test]
+    fn the_carved_starters_keep_their_ids() {
+        for (export, args, material, live) in crate::starters_pinned() {
+            let mut sub = column("pinned", 1.0);
+            sub.export = export.to_string();
+            sub.args = args.iter().map(|a| serde_json::json!(a)).collect();
+            sub.material = material.to_string();
+            assert_eq!(design_id(&sub), live, "{export}{args:?} moved off its live id");
+        }
+    }
+
+    /// A nested recipe field the grower gains tomorrow, left at its default,
+    /// must not rename a design. Spelled with a default the grower already
+    /// has, because a test cannot add a field to a struct — the property is
+    /// the same.
+    #[test]
+    fn a_defaulted_nested_field_does_not_fork_a_design() {
+        let blank_leaf = serde_json::to_value(grove::LeafRecipe::default()).unwrap();
+        let mut sub = column("Oak", 1.0);
+        sub.package = "grove".into();
+        sub.export = String::new();
+        sub.args = Vec::new();
+        sub.material = String::new();
+        let mut terse = sub.clone();
+        terse.recipe = Some(serde_json::json!({ "name": "oak", "leaves": { "per_tip": 9 } }));
+        let mut spelled = sub.clone();
+        spelled.recipe = Some(serde_json::json!({ "name": "oak", "leaves": {
+            "per_tip": 9,
+            "color_autumn": blank_leaf["color_autumn"],
+            "droop": blank_leaf["droop"],
+        }}));
+        assert_eq!(design_id(&terse), design_id(&spelled), "a nested default reached the hash");
+
+        // and the default wither curve, which is not an Option, weighs nothing
+        let canon = canonical_recipe(&terse).unwrap();
+        assert!(canon.get("wither").is_none(), "an all-default nested recipe is dropped: {canon}");
+        assert_eq!(canon["leaves"], serde_json::json!({ "per_tip": 9 }));
+    }
+
+    /// f32 noise in a nested array is the same noise as at the top.
+    #[test]
+    fn nested_float_noise_does_not_fork_a_design() {
+        let mut sub = column("Oak", 1.0);
+        sub.package = "grove".into();
+        sub.export = String::new();
+        sub.args = Vec::new();
+        sub.material = String::new();
+        let mut a = sub.clone();
+        a.recipe = Some(serde_json::json!({ "name": "oak", "color": [0.11, 0.2, 0.3, 1.0] }));
+        let mut b = sub.clone();
+        b.recipe = Some(serde_json::json!({ "name": "oak", "color": [0.10999999940395357_f64, 0.2, 0.3, 1.0] }));
+        assert_eq!(design_id(&a), design_id(&b));
+    }
+
+    /// If Grove gains another nested recipe (`roots: Option<RootRecipe>`, say),
+    /// its defaults will leak into the hash until `strip_blank` names it.
+    /// This is the tripwire: it fails the day that happens, and says so.
+    #[test]
+    fn every_nested_recipe_is_stripped() {
+        let blank = grove::Planting::default().to_value();
+        let nested: Vec<&str> = blank
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(_, v)| v.is_null() || v.is_object())
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let known = ["bark", "blooms", "fruit", "leaves", "wither"];
+        for k in &nested {
+            assert!(known.contains(k), "Grove gained a nested recipe `{k}` — add it to strip_blank (or, for a type without Default, to this list with a note)");
+        }
+    }
+
+    /// Republishing an entry's own stored recipe must land on the same
+    /// design: the canonical form is a fixed point, or the shelf fills with
+    /// a new copy of every tree each time someone presses Republish.
+    #[test]
+    fn the_canonical_form_is_a_fixed_point() {
+        let mut sub = column("Oak", 1.0);
+        sub.package = "grove".into();
+        sub.export = String::new();
+        sub.args = Vec::new();
+        sub.material = String::new();
+        sub.recipe = Some(serde_json::json!({
+            "name": "oak", "seed": 5, "height": 2.2000000476837158, "levels": 4,
+            "angle": [38.0, 36.0, 34.0, 32.0], "forks": [3, 2, 2, 2],
+            "leaves": { "per_tip": 9, "color": [0.14000000059604645, 0.3199999928474426, 0.1, 1.0] },
+            "fruit": { "per_tip": 2 }, "season": 0.35
+        }));
+        let once = canonical_recipe(&sub).unwrap();
+        let first = design_id(&sub);
+        let mut again = sub.clone();
+        again.recipe = Some(once.clone());
+        assert_eq!(canonical_recipe(&again).unwrap(), once, "canonical(canonical(x)) != canonical(x)");
+        assert_eq!(design_id(&again), first);
+        assert_eq!(once["seed"], serde_json::json!(5), "an integer stayed an integer");
+        assert_eq!(once["height"], serde_json::json!(2.2), "f32 noise was rounded away");
+        assert!(once.get("season").is_none(), "the default season weighs nothing");
     }
 
     /// Re-deriving is how a grower change reaches the shelf. The judgement

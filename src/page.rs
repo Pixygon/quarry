@@ -152,6 +152,11 @@ pub fn render(entries: &[Entry], current: Option<&Entry>, locked: bool) -> Strin
         esc(&cur.map(recipe_json).unwrap_or_default())
     ));
     h.push_str(&format!(" <section><h3>Sockets</h3><dl id=\"sockets\">{}</dl></section>\n", cur.map(sockets_dl).unwrap_or_default()));
+    let (life_hidden, life_dl) = match cur.and_then(|e| e.facts.life.as_ref()) {
+        Some(l) => ("", life_dl(l, cur.unwrap())),
+        None => (" hidden", String::new()),
+    };
+    h.push_str(&format!(" <section id=\"life\"{life_hidden}><h3>This moment</h3><dl id=\"life-dl\">{life_dl}</dl></section>\n"));
     h.push_str(" <section><h3>Verdict</h3><div class=\"verdict\" id=\"verdict\"><button data-v=\"yes\">Matches concept</button><button data-v=\"close\">Close, fix noted</button><button data-v=\"no\">Not it</button></div>");
     h.push_str("<textarea id=\"note\" placeholder=\"What is off, in one line. Saved with the design.\"></textarea>");
     h.push_str(&format!("<div class=\"verdict-log\" id=\"verdict-log\">{}</div></section>\n", cur.map(verdict_log).unwrap_or_default()));
@@ -275,19 +280,35 @@ fn recipe_json(e: &Entry) -> String {
     serde_json::to_string_pretty(&v).unwrap_or_default()
 }
 
+fn life_dl(l: &crate::entry::Life, e: &Entry) -> String {
+    let withered = e.recipe.recipe.as_ref().and_then(|r| r.get("withered")).and_then(|v| v.as_bool()).unwrap_or(false);
+    format!(
+        "<dt>Stage</dt><dd>{}</dd><dt>Year</dt><dd>{}</dd><dt>Maturity</dt><dd>{:.0} %</dd><dt>Branches</dt><dd>{}</dd>{}",
+        esc(&l.stage),
+        esc(&l.phase),
+        l.maturity * 100.0,
+        thousands(l.branches),
+        if withered { "<dt>State</dt><dd>withered</dd>" } else { "" }
+    )
+}
+
 fn sockets_dl(e: &Entry) -> String {
     let s = &e.facts.sockets;
     if s.is_empty() {
         return "<dt>Count</dt><dd>none — nothing attaches here</dd>".into();
     }
-    let mut kinds: Vec<&str> = s.iter().map(|x| x.kind.as_str()).collect();
-    kinds.sort_unstable();
-    kinds.dedup();
+    // Sockets by kind — "124 tip · 28 fruit" says what can hang here, which
+    // is what a socket is for.
+    let mut by_kind: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for x in s {
+        *by_kind.entry(x.kind.as_str()).or_default() += 1;
+    }
+    let kinds: Vec<String> = by_kind.iter().map(|(k, n)| format!("{n} {k}")).collect();
     let first = &s[0];
     format!(
         "<dt>Count</dt><dd>{}</dd><dt>Kinds</dt><dd>{}</dd><dt>First</dt><dd>{} @ {}</dd>",
         s.len(),
-        esc(&kinds.join(", ")),
+        esc(&kinds.join(" · ")),
         esc(&first.name),
         first.at.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(", ")
     )
@@ -357,8 +378,9 @@ fn maker() -> String {
   <div class="grid">
    <div class="field"><label for="g-from">Start from</label><select id="g-from"></select></div>
    <div class="field"><label for="g-seed">Seed</label><input id="g-seed" type="number" step="1" min="0"></div>
-   <div class="field"><label for="g-age">Age <span title="Grove does not grow by age yet">(not yet)</span></label><input id="g-age" type="number" disabled placeholder="when Grove ships it"></div>
-   <div class="field"><label for="g-season">Season <span title="Grove does not have seasons yet">(not yet)</span></label><select id="g-season" disabled><option>—</option></select></div>
+   <div class="field"><label for="g-age">Age, seasons</label><input id="g-age" type="number" step="1" min="0" placeholder="blank = grown"></div>
+   <div class="field"><label for="g-season">Season</label><select id="g-season"></select></div>
+   <div class="field"><label for="g-withered">Withered</label><input id="g-withered" type="checkbox"></div>
   </div>
   <div class="two">
    <div><h4>Rules</h4><div class="grid" id="grove-args"></div></div>
@@ -506,6 +528,7 @@ mod tests {
                 materials: vec!["marble".into()],
                 collider: "cylinder".into(),
                 sockets: vec![Socket { name: "cap".into(), at: [0.0, 5.2, 0.0], kind: "capital".into(), size: [0.9; 3] }],
+                life: None,
             },
             preview: format!("/models/{design}.png"),
             license: "CC0-1.0".into(),

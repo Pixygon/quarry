@@ -29,9 +29,10 @@ turned, judged and made in:
   and a **verdict** (*matches · close, fix noted · not it*) with a one-line
   note, kept **on the entry**, so a "not it" survives the browser that said it.
 - **Make** — a door each for Chisel (a library shape, its args, a material)
-  and Grove (a grow recipe, in a form and as JSON, from blank or from
-  anything on the shelf). Avatar's door is shown and is honest about being
-  shut. Both doors can **derive without publishing**, so you look before the
+  and Grove (a plant: its species in a form and as JSON, from blank or from
+  anything on the shelf, plus the **seed**, the **clock** — age in seasons,
+  season in the year — and whether it is **withered**). Avatar's door is
+  shown and is honest about being shut. Both doors can **derive without publishing**, so you look before the
   shelf gains anything.
 
 The page is rendered by this binary with every entry already in the HTML —
@@ -61,11 +62,17 @@ entry.
 ## What an entry carries
 
 - **design** — the hash of the recipe. Same recipe → same design, whoever asks.
+  The hash is over the recipe's *canonical* form: numbers rounded past f32
+  noise, and — for a grown thing — every field the grower would have filled
+  in by default stripped out, inside nested recipes too. A rule Grove gains
+  tomorrow does not rename a tree nobody re-tuned.
 - **recipe** — package, export, args, material. Re-derivable at any size or resolution.
 - **artifact** — the derived `.glb`: PBR-complete (base colour, normal, metallic,
   roughness, occlusion), with its sha256 and triangle count.
 - **facts** — *measured, never claimed*: bounding size, `origin: base|center`,
-  facing, part count, materials, collider, and sockets (where things attach).
+  facing, part count, materials, collider, and sockets (where things attach,
+  typed: `tip`, `bloom`, `fruit`, `cut`). A grown thing also carries its
+  **life** at this moment — stage, phase of the year, maturity, branch count.
   A layout engine cannot use "a handsome weathered column"; it can use these.
 - **verdicts** — what people said when they looked at it beside its concept,
   oldest first. A judgement about a design belongs with the design.

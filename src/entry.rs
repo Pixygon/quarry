@@ -69,6 +69,11 @@ pub struct Submission {
     /// the shelf under this design (what Republish sends).
     #[serde(default)]
     pub source: String,
+    /// Stand the carved thing on the ground: the library centres its
+    /// primitives, and a block that is half underground when placed is no
+    /// use to a layout engine. Part of the recipe, so part of the design.
+    #[serde(default)]
+    pub rest: bool,
 }
 
 fn weft_model() -> String {
@@ -120,6 +125,9 @@ pub struct Recipe {
     /// The grow recipe for `grove` designs — re-derivable, same as args.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipe: Option<serde_json::Value>,
+    /// Carved and stood on the ground. Part of the recipe.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rest: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -308,7 +316,36 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
                 let library = chisel::weft_model::standard_library();
                 let material = (!sub.material.is_empty()).then_some(sub.material.as_str());
                 let model = chisel::weft_model::eval_model_or_part(&library, &sub.export, &sub.args, material)?;
-                (chisel::model::build(&model)?, sub.sockets.clone(), Vec::new())
+                let mut built = chisel::model::build(&model)?;
+                // Coarser LODs from the same recipe: the carving grid and the
+                // bake at a half and a quarter. A 21 000-triangle sphere is
+                // right up close and absurd at fifty metres; Grove ships LODs
+                // and carved things should too.
+                let mut lods = Vec::new();
+                for divisor in [2u32, 4] {
+                    let mut coarse = model.clone();
+                    for m in &mut coarse.materials {
+                        m.resolution = Some((m.resolution.unwrap_or(48) / divisor).max(8));
+                        if let Some(t) = &mut m.texture {
+                            t.size = (t.size / divisor).max(64);
+                        }
+                    }
+                    lods.push(chisel::model::build(&coarse)?);
+                }
+                if sub.rest {
+                    // One shift for every level, measured off LOD0, so they
+                    // stay in register.
+                    let (min, _) = built.bounds();
+                    let lift = -min[1];
+                    for b in std::iter::once(&mut built).chain(lods.iter_mut()) {
+                        for p in &mut b.parts {
+                            for v in &mut p.mesh.positions {
+                                v[1] += lift;
+                            }
+                        }
+                    }
+                }
+                (built, sub.sockets.clone(), lods)
             }
             "grove" => {
                 // A plant is a species, a seed and a clock — one flat object
@@ -432,6 +469,7 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
             args: sub.args.clone(),
             material: sub.material.clone(),
             recipe: if item.is_some() { manifest.clone() } else { canonical_recipe(sub) },
+            rest: sub.rest,
         },
         artifact: Artifact {
             url: format!("{url}/{design}.glb"),
@@ -509,6 +547,11 @@ fn design_id(sub: &Submission) -> String {
         "args": sub.args.iter().map(canonical_number).collect::<Vec<_>>(),
         "material": sub.material,
     });
+    // Only when set: every design published before this flag existed keeps
+    // its name.
+    if sub.rest {
+        canonical["rest"] = serde_json::json!(true);
+    }
     if let Some(r) = canonical_recipe(sub) {
         canonical["recipe"] = r;
     }
@@ -724,7 +767,46 @@ mod tests {
             concept: String::new(),
             glb: None,
             source: String::new(),
+            rest: false,
         }
+    }
+
+    /// Carved things get coarser levels from the same recipe, each with
+    /// fewer triangles and the same footprint.
+    #[test]
+    fn a_carved_thing_has_lods() {
+        let data = tmp("lods");
+        let mut sub = column("Sphere", 1.0);
+        sub.export = "sphere".into();
+        sub.args = vec![serde_json::json!(0.5)];
+        let e = derive(&sub, &data).expect("derives");
+        assert_eq!(e.artifact.lods.len(), 2, "{:?}", e.artifact.lods);
+        let sizes: Vec<u64> = std::iter::once(e.artifact.url.as_str())
+            .chain(e.artifact.lods.iter().map(String::as_str))
+            .map(|u| std::fs::metadata(data.join(u.rsplit('/').next().unwrap())).unwrap().len())
+            .collect();
+        assert!(sizes[0] > sizes[1] && sizes[1] > sizes[2], "each level is smaller than the last: {sizes:?}");
+        assert!(sizes[2] * 4 < sizes[0], "LOD2 is a fraction of LOD0: {sizes:?}");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// `rest` stands a centred shape on the ground — and is part of the
+    /// recipe, so it is a different design, and its absence changes nothing.
+    #[test]
+    fn rest_grounds_a_centred_shape() {
+        let data = tmp("rest");
+        let mut sub = column("Block", 1.0);
+        sub.export = "cube".into();
+        sub.args = vec![serde_json::json!(1.0); 3];
+        let centred = derive(&sub, &data).expect("derives");
+        assert_eq!(centred.facts.origin, "center");
+        let mut rested = sub.clone();
+        rested.rest = true;
+        let grounded = derive(&rested, &data).expect("derives");
+        assert_eq!(grounded.facts.origin, "base", "{:?}", grounded.facts.size);
+        assert_ne!(grounded.design, centred.design, "resting is a different recipe");
+        assert!((grounded.facts.size[1] - centred.facts.size[1]).abs() < 1e-4, "same size");
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     /// The design is the hash of the RECIPE. What a publisher calls it, tags

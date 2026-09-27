@@ -462,7 +462,7 @@ mod tests {
             title: String::new(), description: String::new(), tags: vec![], kind: String::new(), style: String::new(),
             package: "avatar".into(), export: String::new(), args: vec![], recipe: None, material: String::new(),
             license: "CC0-1.0".into(), author: String::new(), origin: "imported".into(), sockets: vec![],
-            codex: String::new(), concept: String::new(), glb: Some(bytes.clone()), source: String::new(),
+            codex: String::new(), concept: String::new(), glb: Some(bytes.clone()), source: String::new(), rest: false,
         };
         let e = crate::entry::derive(&sub, &dir).expect("shelved");
         let stored = std::fs::read(dir.join(format!("{}.glb", e.design))).unwrap();

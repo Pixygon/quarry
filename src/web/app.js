@@ -517,6 +517,7 @@ function submissionOf(m) {
     package: m.recipe.package, export: m.recipe.export, args: m.recipe.args,
     recipe: m.recipe.recipe, material: m.recipe.material,
     license: m.license, author: m.author, origin: m.origin, codex: m.codex, concept: m.concept,
+    rest: !!m.recipe.rest,
   };
 }
 
@@ -562,6 +563,8 @@ function pickShape(name) {
   $('#c-kind').value = shape.kind;
   $('#c-material').value = shape.material;
   $('#c-tags').value = shape.kind;
+  // The library centres its primitives; a placed thing stands on something.
+  $('#c-rest').checked = !!shape.centred;
 }
 
 function chiselSubmission() {
@@ -578,6 +581,7 @@ function chiselSubmission() {
     material: $('#c-material').value,
     codex: $('#c-codex').value.trim(),
     origin: 'authored',
+    rest: $('#c-rest').checked,
   };
 }
 

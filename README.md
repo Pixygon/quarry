@@ -28,7 +28,9 @@ turned, judged and made in:
 - **Ledger** — the measured facts, the recipe, the sockets, the provenance,
   and a **verdict** (*matches · close, fix noted · not it*) with a one-line
   note, kept **on the entry**, so a "not it" survives the browser that said it.
-- **Make** — a door each for Chisel (a library shape, its args, a material)
+- **Make** — a door each for Chisel (a library shape, its args, a material,
+  and whether to stand it on the ground; carved things get LOD1/LOD2 from
+  the same recipe at coarser meshing)
   and Grove (a plant: its species in a form and as JSON, from blank or from
   anything on the shelf, plus the **seed**, the **clock** — age in seasons,
   season in the year — and whether it is **withered**). **Avatar**'s door

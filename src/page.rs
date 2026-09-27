@@ -398,6 +398,7 @@ fn maker() -> String {
    <div class="field"><label for="c-material">Material</label><select id="c-material"></select></div>
    <div class="field"><label for="c-tags">Tags</label><input id="c-tags" placeholder="column, classical"></div>
    <div class="field"><label for="c-codex">Codex slug</label><input id="c-codex" placeholder="lantern-desert"></div>
+   <div class="field"><label for="c-rest">Rest on the ground</label><input id="c-rest" type="checkbox"></div>
   </div>
  </div>
  <div class="door" id="door-grove" hidden>
@@ -546,6 +547,7 @@ mod tests {
                 args: vec![serde_json::json!(5.2), serde_json::json!(0.44)],
                 material: "marble".into(),
                 recipe: None,
+                rest: false,
             },
             artifact: Artifact {
                 url: format!("/models/{design}.glb"),

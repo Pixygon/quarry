@@ -163,6 +163,7 @@ fn seed(data: &PathBuf) {
             concept: String::new(),
             glb: None,
             source: String::new(),
+            rest: false,
         };
         match derive(&sub, data) {
             Ok(e) => println!("seeded {} ({})", e.design, e.title),
@@ -358,6 +359,7 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
                     concept: get("concept"),
                     glb: Some(body.clone()),
                     source: String::new(),
+                    rest: false,
                 }
             } else {
                 match parse_submission(&body) {

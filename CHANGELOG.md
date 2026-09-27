@@ -4,6 +4,14 @@ All notable changes to **Quarry**. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this file is
 materialized from the Pixygon Changelog API — edit there, not here.
 
+## [0.8.0] — 2026-09-27
+
+### Added
+- Carved shapes made with Chisel now automatically get two lower-detail levels (LOD1/LOD2), generated from the same recipe at coarser meshing. Distant objects render with dramatically fewer triangles while keeping the same design identity, and LOD switching on the turntable now actually swaps geometry.
+- Chisel submissions can now be told to "rest on the ground" — for library shapes that are centred by default (block, cylinder, sphere, capsule, cone, torus, bowl), this stands the carving on its base instead of half-burying it when placed. The Make door pre-checks this option automatically for shapes that need it, and it's part of the recipe so existing designs are unaffected.
+- Documentation added covering the Avatar system's current state and roadmap, and findings on Chisel's primitive shapes (including a known issue with the bowl shape's hollow rendering incorrectly, now marked as "not it" on the live shelf).
+
+
 ## [0.7.0] — 2026-09-27
 
 ### Added

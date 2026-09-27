@@ -18,6 +18,9 @@ struct Shape {
     names: &'static [&'static str],
     defaults: &'static [f64],
     material: &'static str,
+    /// The library centres this one; the door offers to rest it on the
+    /// ground by default, because a placed thing stands on something.
+    centred: bool,
 }
 
 /// The carved things worth a door. Combinators (`at`, `join`, `ring_of`…)
@@ -25,33 +28,33 @@ struct Shape {
 /// models, they are not models, so they are not offered as one-click shapes.
 const SHAPES: &[Shape] = &[
     Shape { export: "column", label: "Column", kind: "column",
-            names: &["height", "shaft ⌀"], defaults: &[5.2, 0.44], material: "marble" },
+            names: &["height", "shaft ⌀"], defaults: &[5.2, 0.44], centred: false, material: "marble" },
     Shape { export: "arch", label: "Arch", kind: "arch",
-            names: &["width", "height", "depth"], defaults: &[3.0, 4.0, 0.6], material: "sandstone" },
+            names: &["width", "height", "depth"], defaults: &[3.0, 4.0, 0.6], centred: false, material: "sandstone" },
     Shape { export: "stairs", label: "Stairs", kind: "stairs",
-            names: &["steps", "rise", "tread", "width"], defaults: &[12.0, 0.18, 0.28, 1.2], material: "granite" },
+            names: &["steps", "rise", "tread", "width"], defaults: &[12.0, 0.18, 0.28, 1.2], centred: false, material: "granite" },
     Shape { export: "table", label: "Table", kind: "furniture",
-            names: &["width", "depth", "height"], defaults: &[1.6, 0.9, 0.75], material: "wood" },
+            names: &["width", "depth", "height"], defaults: &[1.6, 0.9, 0.75], centred: false, material: "wood" },
     Shape { export: "vase", label: "Vase", kind: "vessel",
-            names: &["height", "belly r", "neck r"], defaults: &[0.9, 0.3, 0.12], material: "terracotta" },
+            names: &["height", "belly r", "neck r"], defaults: &[0.9, 0.3, 0.12], centred: false, material: "terracotta" },
     Shape { export: "amphora", label: "Amphora", kind: "vessel",
-            names: &["height"], defaults: &[1.2], material: "" },
+            names: &["height"], defaults: &[1.2], centred: false, material: "" },
     Shape { export: "bowl", label: "Bowl", kind: "vessel",
-            names: &["radius", "wall"], defaults: &[0.5, 0.06], material: "granite" },
+            names: &["radius", "wall"], defaults: &[0.5, 0.06], centred: true, material: "granite" },
     Shape { export: "rock", label: "Rock", kind: "rock",
-            names: &["radius", "lumpiness"], defaults: &[0.8, 3.0], material: "granite" },
+            names: &["radius", "lumpiness"], defaults: &[0.8, 3.0], centred: false, material: "granite" },
     Shape { export: "cube", label: "Block", kind: "prop",
-            names: &["width", "height", "depth"], defaults: &[1.0, 1.0, 1.0], material: "granite" },
+            names: &["width", "height", "depth"], defaults: &[1.0, 1.0, 1.0], centred: true, material: "granite" },
     Shape { export: "cylinder", label: "Cylinder", kind: "prop",
-            names: &["radius", "height"], defaults: &[0.4, 1.0], material: "granite" },
+            names: &["radius", "height"], defaults: &[0.4, 1.0], centred: true, material: "granite" },
     Shape { export: "sphere", label: "Sphere", kind: "prop",
-            names: &["radius"], defaults: &[0.5], material: "marble" },
+            names: &["radius"], defaults: &[0.5], centred: true, material: "marble" },
     Shape { export: "capsule", label: "Capsule", kind: "prop",
-            names: &["radius", "height"], defaults: &[0.3, 1.2], material: "plaster" },
+            names: &["radius", "height"], defaults: &[0.3, 1.2], centred: true, material: "plaster" },
     Shape { export: "cone", label: "Cone", kind: "prop",
-            names: &["base r", "top r", "height"], defaults: &[0.5, 0.0, 1.0], material: "sandstone" },
+            names: &["base r", "top r", "height"], defaults: &[0.5, 0.0, 1.0], centred: true, material: "sandstone" },
     Shape { export: "torus", label: "Torus", kind: "prop",
-            names: &["ring r", "tube r"], defaults: &[0.5, 0.1], material: "brass" },
+            names: &["ring r", "tube r"], defaults: &[0.5, 0.1], centred: true, material: "brass" },
 ];
 
 /// The library, read out loud: every shape with the arity the package
@@ -91,6 +94,7 @@ pub fn catalog() -> Value {
             "label": s.label,
             "kind": s.kind,
             "material": s.material,
+            "centred": s.centred,
             "args": s.names.iter().zip(types).zip(s.defaults)
                 .map(|((name, ty), d)| json!({ "name": name, "type": ty, "default": d }))
                 .collect::<Vec<_>>(),

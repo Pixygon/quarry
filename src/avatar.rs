@@ -128,82 +128,7 @@ pub fn check(bytes: &[u8]) -> Result<Checked, String> {
     );
 
     // ── the geometry, measured ──────────────────────────────────────────
-    let mut parts: Vec<BuiltPart> = Vec::new();
-    let mut min = [f32::MAX; 3];
-    let mut max = [f32::MIN; 3];
-    let scene_nodes: Vec<gltf::Node> = match doc.default_scene().or_else(|| doc.scenes().next()) {
-        Some(s) => s.nodes().collect(),
-        None => doc.nodes().filter(|n| n.children().len() == 0 && n.mesh().is_some()).collect(),
-    };
-    let mut stack: Vec<(gltf::Node, [[f32; 4]; 4])> = scene_nodes.into_iter().map(|n| (n, IDENTITY)).collect();
-    while let Some((node, parent)) = stack.pop() {
-        let world = mul(parent, node.transform().matrix());
-        // A skinned mesh's vertices live in the skeleton's space; the glTF
-        // spec says its own node transform is ignored. Rigid ones move.
-        let skinned = node.skin().is_some();
-        if let Some(mesh) = node.mesh() {
-            for prim in mesh.primitives() {
-                let reader = prim.reader(|b| buffers.get(b.index()).map(|d| &d.0[..]));
-                let Some(pos) = reader.read_positions() else { continue };
-                let positions: Vec<[f32; 3]> = pos.map(|p| if skinned { p } else { transform(world, p) }).collect();
-                for p in &positions {
-                    for i in 0..3 {
-                        min[i] = min[i].min(p[i]);
-                        max[i] = max[i].max(p[i]);
-                    }
-                }
-                let indices: Vec<u32> = match reader.read_indices() {
-                    Some(ix) => ix.into_u32().collect(),
-                    None => (0..positions.len() as u32).collect(),
-                };
-                let normals: Vec<[f32; 3]> = match reader.read_normals() {
-                    Some(n) => n.map(|n| if skinned { n } else { rotate(world, n) }).collect(),
-                    None => flat_normals(&positions, &indices),
-                };
-                let uvs: Vec<[f32; 2]> = reader
-                    .read_tex_coords(0)
-                    .map(|t| t.into_f32().collect())
-                    .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
-                let colors: Vec<[f32; 4]> = reader
-                    .read_colors(0)
-                    .map(|c| c.into_rgba_f32().collect())
-                    .unwrap_or_else(|| vec![[1.0; 4]; positions.len()]);
-                let mat = prim.material();
-                let name = mat
-                    .name()
-                    .map(str::to_string)
-                    .or_else(|| mesh.name().map(str::to_string))
-                    .unwrap_or_else(|| format!("part {}", parts.len()));
-                let mut color = mat.pbr_metallic_roughness().base_color_factor();
-                // A grey-white factor with a texture reads as bare plaster on
-                // the turntable; the real colour is in the texture we do not
-                // sample here. Tint it toward a neutral so the sheet reads.
-                if mat.pbr_metallic_roughness().base_color_texture().is_some() && color[..3].iter().all(|c| *c > 0.95) {
-                    color = [0.72, 0.7, 0.66, 1.0];
-                }
-                let n = positions.len();
-                parts.push(BuiltPart {
-                    name,
-                    mesh: MeshData {
-                        positions,
-                        normals,
-                        uvs,
-                        tangents: vec![[1.0, 0.0, 0.0, 1.0]; n],
-                        colors,
-                        uv2: vec![[0.0, 0.0]; n],
-                        indices,
-                    },
-                    baked: None,
-                    color,
-                    emissive: mat.emissive_factor().iter().cloned().fold(0.0, f32::max),
-                    double_sided: mat.double_sided(),
-                });
-            }
-        }
-        for child in node.children() {
-            stack.push((child, world));
-        }
-    }
+    let (parts, min, max) = walk(&doc, &buffers);
     if parts.is_empty() || parts.iter().all(|p| p.mesh.indices.is_empty()) {
         return Err("no geometry: the GLB has no mesh in its scene".into());
     }
@@ -282,6 +207,102 @@ pub fn check(bytes: &[u8]) -> Result<Checked, String> {
         materials,
         attach: attach.into(),
     })
+}
+
+
+/// Every primitive in the scene as a chisel part, with the bounds — the
+/// reader the checker and the hanger share. Skinned meshes stay in bind
+/// space (the glTF rule); rigid ones take their node's transform.
+fn walk(doc: &gltf::Document, buffers: &[gltf::buffer::Data]) -> (Vec<BuiltPart>, [f32; 3], [f32; 3]) {
+    let mut parts: Vec<BuiltPart> = Vec::new();
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    let scene_nodes: Vec<gltf::Node> = match doc.default_scene().or_else(|| doc.scenes().next()) {
+        Some(s) => s.nodes().collect(),
+        None => doc.nodes().filter(|n| n.children().len() == 0 && n.mesh().is_some()).collect(),
+    };
+    let mut stack: Vec<(gltf::Node, [[f32; 4]; 4])> = scene_nodes.into_iter().map(|n| (n, IDENTITY)).collect();
+    while let Some((node, parent)) = stack.pop() {
+        let world = mul(parent, node.transform().matrix());
+        // A skinned mesh's vertices live in the skeleton's space; the glTF
+        // spec says its own node transform is ignored. Rigid ones move.
+        let skinned = node.skin().is_some();
+        if let Some(mesh) = node.mesh() {
+            for prim in mesh.primitives() {
+                let reader = prim.reader(|b| buffers.get(b.index()).map(|d| &d.0[..]));
+                let Some(pos) = reader.read_positions() else { continue };
+                let positions: Vec<[f32; 3]> = pos.map(|p| if skinned { p } else { transform(world, p) }).collect();
+                for p in &positions {
+                    for i in 0..3 {
+                        min[i] = min[i].min(p[i]);
+                        max[i] = max[i].max(p[i]);
+                    }
+                }
+                let indices: Vec<u32> = match reader.read_indices() {
+                    Some(ix) => ix.into_u32().collect(),
+                    None => (0..positions.len() as u32).collect(),
+                };
+                let normals: Vec<[f32; 3]> = match reader.read_normals() {
+                    Some(n) => n.map(|n| if skinned { n } else { rotate(world, n) }).collect(),
+                    None => flat_normals(&positions, &indices),
+                };
+                let uvs: Vec<[f32; 2]> = reader
+                    .read_tex_coords(0)
+                    .map(|t| t.into_f32().collect())
+                    .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+                let colors: Vec<[f32; 4]> = reader
+                    .read_colors(0)
+                    .map(|c| c.into_rgba_f32().collect())
+                    .unwrap_or_else(|| vec![[1.0; 4]; positions.len()]);
+                let mat = prim.material();
+                let name = mat
+                    .name()
+                    .map(str::to_string)
+                    .or_else(|| mesh.name().map(str::to_string))
+                    .unwrap_or_else(|| format!("part {}", parts.len()));
+                let mut color = mat.pbr_metallic_roughness().base_color_factor();
+                // A grey-white factor with a texture reads as bare plaster on
+                // the turntable; the real colour is in the texture we do not
+                // sample here. Tint it toward a neutral so the sheet reads.
+                if mat.pbr_metallic_roughness().base_color_texture().is_some() && color[..3].iter().all(|c| *c > 0.95) {
+                    color = [0.72, 0.7, 0.66, 1.0];
+                }
+                let n = positions.len();
+                parts.push(BuiltPart {
+                    name,
+                    mesh: MeshData {
+                        positions,
+                        normals,
+                        uvs,
+                        tangents: vec![[1.0, 0.0, 0.0, 1.0]; n],
+                        colors,
+                        uv2: vec![[0.0, 0.0]; n],
+                        indices,
+                    },
+                    baked: None,
+                    color,
+                    emissive: mat.emissive_factor().iter().cloned().fold(0.0, f32::max),
+                    double_sided: mat.double_sided(),
+                });
+            }
+        }
+        for child in node.children() {
+            stack.push((child, world));
+        }
+    }
+    (parts, min, max)
+}
+
+/// A GLB somebody else made, as a chisel model — for the turntable, the
+/// bounds, and for hanging it at a tree's sockets. Nothing is checked here
+/// beyond "it loads and has a mesh".
+pub fn built_from_glb(bytes: &[u8], name: &str) -> Result<Built, String> {
+    let (doc, buffers, _) = gltf::import_slice(bytes).map_err(|e| format!("not a GLB the loader accepts: {e}"))?;
+    let (parts, _, _) = walk(&doc, &buffers);
+    if parts.is_empty() {
+        return Err("the GLB has no mesh in its scene".into());
+    }
+    Ok(Built { name: name.into(), parts })
 }
 
 // ── a little matrix algebra, column-major as glTF hands it over ──────────
@@ -462,7 +483,7 @@ mod tests {
             title: String::new(), description: String::new(), tags: vec![], kind: String::new(), style: String::new(),
             package: "avatar".into(), export: String::new(), args: vec![], recipe: None, material: String::new(),
             license: "CC0-1.0".into(), author: String::new(), origin: "imported".into(), sockets: vec![],
-            codex: String::new(), concept: String::new(), glb: Some(bytes.clone()), source: String::new(), rest: false,
+            codex: String::new(), concept: String::new(), glb: Some(bytes.clone()), source: String::new(), rest: false, hang: None,
         };
         let e = crate::entry::derive(&sub, &dir).expect("shelved");
         let stored = std::fs::read(dir.join(format!("{}.glb", e.design))).unwrap();

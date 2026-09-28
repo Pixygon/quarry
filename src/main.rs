@@ -164,6 +164,7 @@ fn seed(data: &PathBuf) {
             glb: None,
             source: String::new(),
             rest: false,
+            hang: None,
         };
         match derive(&sub, data) {
             Ok(e) => println!("seeded {} ({})", e.design, e.title),
@@ -360,6 +361,7 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
                     glb: Some(body.clone()),
                     source: String::new(),
                     rest: false,
+                    hang: None,
                 }
             } else {
                 match parse_submission(&body) {
@@ -369,10 +371,11 @@ async fn handle(mut stream: TcpStream, app: Arc<App>) -> std::io::Result<()> {
             };
             let shelve = path == "/publish";
             let dir = if shelve { app.data.clone() } else { app.scratch.clone() };
+            let shelf = app.data.clone();
             // Carving and growing block; keep them off the runtime's threads.
             let _permit = app.kiln.acquire().await;
             let made = tokio::task::spawn_blocking(move || {
-                if shelve { derive(&sub, &dir) } else { entry::derive_scratch(&sub, &dir) }
+                if shelve { derive(&sub, &dir) } else { entry::derive_scratch(&sub, &dir, &shelf) }
             })
             .await
             .unwrap_or_else(|e| Err(format!("the kiln died: {e}")));

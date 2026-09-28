@@ -74,6 +74,20 @@ pub struct Submission {
     /// use to a layout engine. Part of the recipe, so part of the design.
     #[serde(default)]
     pub rest: bool,
+    /// For `package: "grove"`: something on the shelf to hang at the plant's
+    /// sockets — a lantern at every fruit socket. Part of the recipe: a tree
+    /// with its lanterns is a different design from the bare tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hang: Option<Hang>,
+}
+
+/// What hangs where. `design` is a Quarry design on the shelf; the rest is
+/// Grove's own `HangRecipe`, flat, defaults omitted.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Hang {
+    pub design: String,
+    #[serde(flatten)]
+    pub rule: grove::HangRecipe,
 }
 
 fn weft_model() -> String {
@@ -128,6 +142,9 @@ pub struct Recipe {
     /// Carved and stood on the ground. Part of the recipe.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rest: bool,
+    /// What hangs at the sockets, and how.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hang: Option<Hang>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -166,6 +183,22 @@ pub struct Facts {
     /// contains, and how it did against the Portable Item Convention.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<Item>,
+    /// Grown things with something hung at their sockets: where each one
+    /// sits. The artifact is the bare plant; an importer instances the hung
+    /// design at these, exactly as the table does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hung: Option<Hung>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Hung {
+    /// The design instanced at each placement.
+    pub design: String,
+    pub kind: String,
+    /// How many were hung — the sockets of that kind the plant had, capped
+    /// by the recipe's `count`. Out of season a fruit tree hangs nothing.
+    pub count: usize,
+    pub placements: Vec<grove::Placement>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -261,17 +294,17 @@ pub fn now() -> u64 {
 /// recipe twice is idempotent — the shelf never fills with near-duplicates
 /// of the same design.
 pub fn derive(sub: &Submission, data: &Path) -> Result<Entry, String> {
-    make(sub, data, "/models", true)
+    make(sub, data, data, "/models", true)
 }
 
 /// Run the recipe and keep nothing on the shelf — the "look before you
 /// publish" door. The artifact still has to exist for a browser to open it,
 /// so it lands in a scratch drawer served at `/derived/…` and swept when it
 /// gets crowded; it is not an entry, it is not searchable, it is a look.
-pub fn derive_scratch(sub: &Submission, scratch: &Path) -> Result<Entry, String> {
+pub fn derive_scratch(sub: &Submission, scratch: &Path, shelf: &Path) -> Result<Entry, String> {
     std::fs::create_dir_all(scratch).map_err(|e| format!("cannot open the scratch drawer: {e}"))?;
     sweep(scratch, 40);
-    make(sub, scratch, "/derived", false)
+    make(sub, scratch, shelf, "/derived", false)
 }
 
 /// Keep the scratch drawer from becoming a shelf nobody swept: oldest
@@ -296,7 +329,10 @@ fn sweep(scratch: &Path, keep: usize) {
     }
 }
 
-fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, String> {
+/// `dir` is where this run's files go; `shelf` is where designs already
+/// published live — the same place when shelving, the data dir when a look
+/// in the scratch drawer needs something to hang.
+fn make(sub: &Submission, dir: &Path, shelf: &Path, url: &str, shelve: bool) -> Result<Entry, String> {
     // An avatar item names itself in its manifest; everything else must be
     // told what it is called.
     if sub.title.trim().is_empty() && sub.package != "avatar" {
@@ -307,6 +343,8 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
     // wpm packages come later. Sockets are MEASURED where the recipe yields
     // them (a grown tree ends in tips); declared ones are kept otherwise.
     let mut life: Option<Life> = None;
+    let mut hung: Option<Hung> = None;
+    let mut hung_thing: Option<(chisel::model::Built, Vec<grove::Placement>)> = None;
     let mut item: Option<Item> = None;
     let mut original: Option<Vec<u8>> = None;
     let mut manifest: Option<serde_json::Value> = None;
@@ -370,6 +408,27 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
                     maturity: grown.maturity,
                     branches: grown.branches.len(),
                 });
+                if let Some(h) = &sub.hang {
+                    // The hung thing is a design on the shelf. Its own top
+                    // decides how far under the tip it sits, so a lantern
+                    // with its origin at the base hangs as well as one with
+                    // it at the hook.
+                    if !is_design(&h.design) {
+                        return Err(format!("`{}` is not a design id", h.design));
+                    }
+                    let bytes = std::fs::read(shelf.join(format!("{}.glb", h.design)))
+                        .map_err(|_| format!("nothing on the shelf under design {} to hang", h.design))?;
+                    let thing = crate::avatar::built_from_glb(&bytes, &h.design)?;
+                    let (_, tmax) = thing.bounds();
+                    let placements = grove::hang(&grown.sockets, tmax[1], &h.rule);
+                    hung_thing = Some((thing, placements.clone()));
+                    hung = Some(Hung {
+                        design: h.design.clone(),
+                        kind: kind_name(h.rule.kind),
+                        count: placements.len(),
+                        placements,
+                    });
+                }
                 (grown.built, sockets, grown.lods)
             }
             "avatar" => {
@@ -422,7 +481,18 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
     }
     let preview_opts = chisel::preview::PreviewOptions { width: 384, height: 384, views: 3, ..Default::default() };
     let png_path = dir.join(format!("{design}.png"));
-    let _ = chisel::preview::write_png(&built, preview_opts, &png_path.to_string_lossy());
+    match &hung_thing {
+        // The turntable shows the tree WITH its lanterns — that is what a
+        // person judges against the concept — while the stored glb stays
+        // the bare plant an importer instances onto.
+        Some((thing, placements)) => {
+            let shown = compose(&built, thing, placements);
+            let _ = chisel::preview::write_png(&shown, preview_opts, &png_path.to_string_lossy());
+        }
+        None => {
+            let _ = chisel::preview::write_png(&built, preview_opts, &png_path.to_string_lossy());
+        }
+    }
 
     let (min, max) = built.bounds();
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
@@ -470,6 +540,7 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
             material: sub.material.clone(),
             recipe: if item.is_some() { manifest.clone() } else { canonical_recipe(sub) },
             rest: sub.rest,
+            hang: sub.hang.clone(),
         },
         artifact: Artifact {
             url: format!("{url}/{design}.glb"),
@@ -490,6 +561,7 @@ fn make(sub: &Submission, dir: &Path, url: &str, shelve: bool) -> Result<Entry, 
             sockets,
             life,
             item,
+            hung,
         },
         preview: format!("{url}/{design}.png"),
         license: sub.license.clone(),
@@ -552,6 +624,9 @@ fn design_id(sub: &Submission) -> String {
     if sub.rest {
         canonical["rest"] = serde_json::json!(true);
     }
+    if let Some(h) = &sub.hang {
+        canonical["hang"] = canonical_hang(h);
+    }
     if let Some(r) = canonical_recipe(sub) {
         canonical["recipe"] = r;
     }
@@ -579,6 +654,71 @@ fn canonical_recipe(sub: &Submission) -> Option<serde_json::Value> {
     };
     obj.retain(|k, v| def.get(k) != Some(v));
     Some(serde_json::Value::Object(obj))
+}
+
+/// A hang as the recipe says it: the design, and only the rules that
+/// differ from Grove's default — so a knob the grower gains tomorrow does
+/// not rename every tree with lanterns.
+fn canonical_hang(h: &Hang) -> serde_json::Value {
+    let mut v = canonical_numbers(serde_json::to_value(&h.rule).unwrap_or_default());
+    let blank = canonical_numbers(serde_json::to_value(grove::HangRecipe::default()).unwrap_or_default());
+    if let (Some(obj), Some(b)) = (v.as_object_mut(), blank.as_object()) {
+        obj.retain(|k, x| b.get(k) != Some(x));
+        obj.insert("design".into(), serde_json::json!(h.design));
+    }
+    v
+}
+
+/// The plant with the hung thing at every placement, as one model — for the
+/// turntable. Instances are baked here and only here.
+fn compose(plant: &chisel::model::Built, thing: &chisel::model::Built, placements: &[grove::Placement]) -> chisel::model::Built {
+    let mut parts: Vec<chisel::model::BuiltPart> = plant
+        .parts
+        .iter()
+        .map(|p| chisel::model::BuiltPart {
+            name: p.name.clone(),
+            mesh: p.mesh.clone(),
+            baked: p.baked.clone(),
+            color: p.color,
+            emissive: p.emissive,
+            double_sided: p.double_sided,
+        })
+        .collect();
+    for pl in placements {
+        let [qx, qy, qz, qw] = pl.rotation;
+        for p in &thing.parts {
+            let mut mesh = p.mesh.clone();
+            for v in &mut mesh.positions {
+                let s = [v[0] * pl.scale[0], v[1] * pl.scale[1], v[2] * pl.scale[2]];
+                let r = rotate_q(s, qx, qy, qz, qw);
+                *v = [r[0] + pl.translation[0], r[1] + pl.translation[1], r[2] + pl.translation[2]];
+            }
+            for n in &mut mesh.normals {
+                *n = rotate_q(*n, qx, qy, qz, qw);
+            }
+            parts.push(chisel::model::BuiltPart {
+                name: format!("{}@{}", p.name, pl.socket),
+                mesh,
+                baked: p.baked.clone(),
+                color: p.color,
+                emissive: p.emissive,
+                double_sided: p.double_sided,
+            });
+        }
+    }
+    chisel::model::Built { name: plant.name.clone(), parts }
+}
+
+fn rotate_q(v: [f32; 3], x: f32, y: f32, z: f32, w: f32) -> [f32; 3] {
+    // v' = v + 2w(q × v) + 2(q × (q × v))
+    let c1 = [y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]];
+    let c2 = [y * c1[2] - z * c1[1], z * c1[0] - x * c1[2], x * c1[1] - y * c1[0]];
+    [v[0] + 2.0 * (w * c1[0] + c2[0]), v[1] + 2.0 * (w * c1[1] + c2[1]), v[2] + 2.0 * (w * c1[2] + c2[2])]
+}
+
+/// Sixteen hex digits the Quarry minted, or nothing.
+fn is_design(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// The recipes a species carries INSIDE it — leaves, the wither curve, the
@@ -768,6 +908,7 @@ mod tests {
             glb: None,
             source: String::new(),
             rest: false,
+            hang: None,
         }
     }
 
@@ -965,6 +1106,64 @@ mod tests {
         assert!(once.get("season").is_none(), "the default season weighs nothing");
     }
 
+    /// A lantern at every fruit socket: the placements are facts, the
+    /// artifact stays the bare tree, and the hang is part of the design.
+    #[test]
+    fn a_tree_hangs_a_design_from_the_shelf() {
+        let data = tmp("hang");
+        // the lantern: a small carved orb, published first
+        let mut orb = column("Orb", 1.0);
+        orb.export = "sphere".into();
+        orb.args = vec![serde_json::json!(0.12)];
+        orb.material = "brass".into();
+        let orb = derive(&orb, &data).expect("the orb shelves");
+
+        let mut tree = column("Lantern tree", 1.0);
+        tree.package = "grove".into();
+        tree.export = String::new();
+        tree.args = Vec::new();
+        tree.material = String::new();
+        tree.recipe = Some(serde_json::json!({
+            "name": "lantern", "seed": 7, "height": 1.9, "levels": 3, "forks": [3, 2, 2],
+            "fruit": { "per_tip": 1, "season": [0.3, 0.9] }, "season": 0.55
+        }));
+        let bare = derive(&tree, &data).expect("the bare tree grows");
+        let fruit_sockets = bare.facts.sockets.iter().filter(|s| s.kind == "fruit").count();
+        assert!(fruit_sockets > 0, "the test tree must fruit in season: {:?}", bare.facts.life);
+
+        let mut lit = tree.clone();
+        lit.hang = Some(Hang {
+            design: orb.design.clone(),
+            rule: grove::HangRecipe { kind: grove::SocketKind::Fruit, count: 0, drop: 0.1, ..Default::default() },
+        });
+        let lit = derive(&lit, &data).expect("the lit tree grows");
+        assert_ne!(lit.design, bare.design, "a tree with lanterns is a different design");
+        let hung = lit.facts.hung.as_ref().expect("placements are facts");
+        assert_eq!(hung.count, fruit_sockets, "one at every fruit socket");
+        assert_eq!(hung.placements.len(), fruit_sockets);
+        assert_eq!(hung.design, orb.design);
+        // the artifact is the bare plant: same triangle count as without lanterns
+        assert_eq!(lit.artifact.tris, bare.artifact.tris, "the stored glb must not bake the instances");
+        // every lantern hangs BELOW its socket
+        for p in &hung.placements {
+            let s = lit.facts.sockets.iter().find(|s| s.name == p.socket).expect("placement names a socket");
+            assert!(p.translation[1] < s.at[1], "{} hangs above its tip", p.socket);
+        }
+        // capped by count
+        let mut two = tree.clone();
+        two.hang = Some(Hang { design: orb.design.clone(), rule: grove::HangRecipe { kind: grove::SocketKind::Fruit, count: 2, ..Default::default() } });
+        assert_eq!(derive(&two, &data).unwrap().facts.hung.unwrap().count, 2);
+        // republishing the entry's own recipe lands on the same design
+        let mut again = tree.clone();
+        again.hang = lit.recipe.hang.clone();
+        assert_eq!(derive(&again, &data).unwrap().design, lit.design);
+        // and a design that is not on the shelf is refused by name
+        let mut ghost = tree.clone();
+        ghost.hang = Some(Hang { design: "0000000000000000".into(), rule: Default::default() });
+        assert!(derive(&ghost, &data).unwrap_err().contains("nothing on the shelf"));
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
     /// Re-deriving is how a grower change reaches the shelf. The judgement
     /// and the concept belong to the design, not to the run that made it.
     #[test]
@@ -1009,7 +1208,7 @@ mod tests {
     #[test]
     fn a_scratch_derive_is_not_an_entry() {
         let scratch = tmp("scratch");
-        let e = derive_scratch(&column("Probe", 3.0), &scratch).expect("derives");
+        let e = derive_scratch(&column("Probe", 3.0), &scratch, &scratch).expect("derives");
         assert!(e.artifact.url.starts_with("/derived/"), "{}", e.artifact.url);
         assert!(e.preview.starts_with("/derived/"));
         assert!(scratch.join(format!("{}.glb", e.design)).exists());

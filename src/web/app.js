@@ -151,6 +151,12 @@ function show() {
   $('#sockets').innerHTML = sk.length
     ? `<dt>Count</dt><dd>${sk.length}</dd><dt>Kinds</dt><dd>${esc(Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(' · ') || '—')}</dd><dt>First</dt><dd>${esc(sk[0].name)} @ ${sk[0].at.map((v) => v.toFixed(2)).join(', ')}</dd>`
     : '<dt>Count</dt><dd>none — nothing attaches here</dd>';
+  const hung = f.hung;
+  $('#hung').hidden = !hung;
+  if (hung) {
+    const p0 = hung.placements[0];
+    $('#hung-dl').innerHTML = `<dt>Design</dt><dd class="id"><a href="/m/${hung.design}">${hung.design}</a></dd><dt>At</dt><dd>${hung.count} ${esc(hung.kind)} sockets</dd><dt>First</dt><dd>${p0 ? esc(p0.socket) + ' @ ' + p0.translation.map((v) => v.toFixed(2)).join(', ') : '— nothing to hang on at this moment'}</dd>`;
+  }
   const item = f.item;
   $('#item').hidden = !item;
   if (item) {
@@ -310,6 +316,7 @@ function load(m) {
     frame(model, m);
     pane.classList.add('live');
     say('');
+    hangOn(m, mine);
     $('#cap').textContent = `${m.title.toLowerCase()} · lod${state.lod}` + (swayable ? '' : ' · no wind channel');
     $('#wind').disabled = swayable === 0;
     $('#wind').title = swayable ? 'Play the wind written into the vertex alpha' : 'This model carries no wind channel — carved stone does not sway';
@@ -318,6 +325,28 @@ function load(m) {
     loaded = null;
     say('could not open ' + url + ' — ' + (err && err.message ? err.message : 'the artifact did not load'), true);
   });
+}
+
+// The hung design, instanced at every placement the store measured — the
+// same TRS an importer reads, so what you judge here is what Unity gets.
+// The artifact stays the bare plant; the lanterns are data.
+function hangOn(m, mine) {
+  const h = m.facts.hung;
+  if (!h || !h.placements.length) return;
+  say(`hanging ${h.count} × ${h.design.slice(0, 8)}…`);
+  loader.load(`/models/${h.design}.glb`, (gltf) => {
+    if (mine !== token || !model) return;
+    gltf.scene.traverse((o) => { if (o.isMesh) { rigidity(o.geometry); for (const mat of [].concat(o.material)) patch(mat); } });
+    for (const p of h.placements) {
+      const inst = gltf.scene.clone(true);
+      inst.position.set(...p.translation);
+      inst.quaternion.set(...p.rotation);
+      inst.scale.set(...p.scale);
+      inst.name = 'hung:' + p.socket;
+      model.add(inst);
+    }
+    say('');
+  }, undefined, () => say(`could not open the hung design ${h.design}`, true));
 }
 
 // Copy the grower's rigidity out of vertex-colour alpha into an attribute of
@@ -518,6 +547,7 @@ function submissionOf(m) {
     recipe: m.recipe.recipe, material: m.recipe.material,
     license: m.license, author: m.author, origin: m.origin, codex: m.codex, concept: m.concept,
     rest: !!m.recipe.rest,
+    hang: m.recipe.hang || undefined,
   };
 }
 
@@ -610,13 +640,38 @@ const PLANTING = ['seed', 'age', 'season', 'withered', 'cut', 'taken', 'clock', 
 const tidy = (v) => (typeof v === 'number' ? +v.toPrecision(7) : v);
 let recipe = {};
 
+function hangList() {
+  // Anything on the shelf can hang — a carved orb, a Trellis fruit, another
+  // tree if you must. Sorted so the small things a socket can carry come first.
+  const things = [...MODELS].sort((a, b) => a.facts.size[1] - b.facts.size[1]);
+  $('#h-design').innerHTML = '<option value="">nothing</option>' + things.map((m) => `<option value="${m.design}">${esc(m.title)} · ${m.facts.size.map((v) => v.toFixed(2)).join('×')} m</option>`).join('');
+}
+
+function hangOf() {
+  const d = $('#h-design').value;
+  if (!d) return undefined;
+  return {
+    design: d, kind: $('#h-kind').value,
+    count: Math.max(0, parseInt($('#h-count').value, 10) || 0),
+    scale: parseFloat($('#h-scale').value) || 1,
+    drop: parseFloat($('#h-drop').value) || 0,
+    spin: $('#h-spin').checked,
+  };
+}
+
 function groveDoor() {
+  hangList();
   const grown = MODELS.filter((m) => m.recipe.package === 'grove');
   $('#g-from').innerHTML = '<option value="">a blank recipe</option>' + grown.map((m) => `<option value="${m.design}">${esc(m.title)}</option>`).join('');
   $('#g-from').onchange = () => {
     const m = grown.find((x) => x.design === $('#g-from').value);
     recipe = structuredClone(m ? (m.recipe.recipe || {}) : LIB.grove.blank);
-    if (m) { $('#g-title').value = m.title; $('#g-style').value = m.style || ''; $('#g-tags').value = m.tags.join(', '); $('#g-codex').value = m.codex || ''; }
+    if (m) {
+      $('#g-title').value = m.title; $('#g-style').value = m.style || ''; $('#g-tags').value = m.tags.join(', '); $('#g-codex').value = m.codex || '';
+      const h = m.recipe.hang;
+      $('#h-design').value = h ? h.design : '';
+      if (h) { $('#h-kind').value = h.kind || 'tip'; $('#h-count').value = h.count ?? 0; $('#h-scale').value = h.scale ?? 1; $('#h-drop').value = h.drop ?? 0.15; $('#h-spin').checked = h.spin !== false; }
+    }
     groveForm();
   };
   recipe = structuredClone(LIB.grove.blank);
@@ -685,6 +740,7 @@ function groveSubmission() {
     package: 'grove', recipe,
     codex: $('#g-codex').value.trim(),
     origin: 'grown',
+    hang: hangOf(),
   };
 }
 
@@ -754,6 +810,7 @@ $('#m-derive').onclick = () => run('/derive', (e) => {
 
 $('#m-publish').onclick = () => run('/publish', (e) => {
   replace(e);
+  if (LIB) hangList();
   state.preview = null;
   state.design = e.design;
   state.lod = 0;

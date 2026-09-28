@@ -4,6 +4,15 @@ All notable changes to **Quarry**. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this file is
 materialized from the Pixygon Changelog API — edit there, not here.
 
+## [0.9.0] — 2026-09-28
+
+### Added
+- Grove trees can now hang another design from the shelf at their sockets — for example, lanterns hung at every fruit socket on a lantern tree. The hung items are stored as placement data, not baked into the tree's geometry, so an importer (or Quarry's own turntable) instances the real design at each socket while the base plant model stays lightweight.
+- The design page now shows a 'Hung' section listing what is hung, how many sockets it occupies, and the position of the first placement, so you can inspect a tree's lanterns (or other hung items) without opening the recipe JSON.
+- The 3D preview for grove designs now renders hung items (like lanterns) placed on the tree in the live viewer, matching exactly what an importer would see.
+- The publishing form for grove recipes now has a 'Hang at the sockets' section, letting you pick any published design, choose which socket kind to attach it to (fruit, tip, or bloom), and control count, scale, drop, and spin — all without editing raw JSON.
+
+
 ## [0.8.0] — 2026-09-27
 
 ### Added

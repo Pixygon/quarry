@@ -161,6 +161,11 @@ pub fn render(entries: &[Entry], current: Option<&Entry>, locked: bool) -> Strin
         Some(i) => ("", item_dl(i), checks_ul(i)),
         None => (" hidden", String::new(), String::new()),
     };
+    let (hung_hidden, hung_dl) = match cur.and_then(|e| e.facts.hung.as_ref()) {
+        Some(h) => ("", hung_dl(h)),
+        None => (" hidden", String::new()),
+    };
+    h.push_str(&format!(" <section id=\"hung\"{hung_hidden}><h3>Hung</h3><dl id=\"hung-dl\">{hung_dl}</dl></section>\n"));
     h.push_str(&format!(" <section id=\"item\"{item_hidden}><h3>The item</h3><dl id=\"item-dl\">{item_dl}</dl><ul class=\"checks\" id=\"checks\">{checks}</ul></section>\n"));
     h.push_str(" <section><h3>Verdict</h3><div class=\"verdict\" id=\"verdict\"><button data-v=\"yes\">Matches concept</button><button data-v=\"close\">Close, fix noted</button><button data-v=\"no\">Not it</button></div>");
     h.push_str("<textarea id=\"note\" placeholder=\"What is off, in one line. Saved with the design.\"></textarea>");
@@ -283,6 +288,16 @@ fn recipe_json(e: &Entry) -> String {
         serde_json::json!({ "export": e.recipe.export, "args": e.recipe.args, "material": e.recipe.material })
     });
     serde_json::to_string_pretty(&v).unwrap_or_default()
+}
+
+fn hung_dl(h: &crate::entry::Hung) -> String {
+    format!(
+        "<dt>Design</dt><dd class=\"id\"><a href=\"/m/{d}\">{d}</a></dd><dt>At</dt><dd>{} {} sockets</dd><dt>First</dt><dd>{}</dd>",
+        h.count,
+        esc(&h.kind),
+        h.placements.first().map(|p| format!("{} @ {:.2}, {:.2}, {:.2}", esc(&p.socket), p.translation[0], p.translation[1], p.translation[2])).unwrap_or_else(|| "— nothing to hang on at this moment".into()),
+        d = esc(&h.design)
+    )
 }
 
 fn item_dl(i: &crate::entry::Item) -> String {
@@ -412,6 +427,15 @@ fn maker() -> String {
   <div class="two">
    <div><h4>Rules</h4><div class="grid" id="grove-args"></div></div>
    <div><h4>The recipe itself</h4><textarea class="json" id="g-json" spellcheck="false"></textarea><p class="note">The form writes into this; edit it directly for bark, leaves and colour. The form wins on the next field you touch.</p></div>
+  </div>
+  <h4>Hang at the sockets</h4>
+  <div class="grid">
+   <div class="field"><label for="h-design">Hang</label><select id="h-design"><option value="">nothing</option></select></div>
+   <div class="field"><label for="h-kind">At</label><select id="h-kind"><option value="fruit">fruit sockets</option><option value="tip">tips</option><option value="bloom">blooms</option></select></div>
+   <div class="field"><label for="h-count">Count <span style="text-transform:none;letter-spacing:0">(0 = all)</span></label><input id="h-count" type="number" step="1" min="0" value="0"></div>
+   <div class="field"><label for="h-scale">Scale ×</label><input id="h-scale" type="number" step="0.05" min="0.01" value="1"></div>
+   <div class="field"><label for="h-drop">Drop, m</label><input id="h-drop" type="number" step="0.05" min="0" value="0.15"></div>
+   <div class="field"><label for="h-spin">Spin</label><input id="h-spin" type="checkbox" checked></div>
   </div>
   <h4>Words</h4>
   <div class="grid">
@@ -548,6 +572,7 @@ mod tests {
                 material: "marble".into(),
                 recipe: None,
                 rest: false,
+                hang: None,
             },
             artifact: Artifact {
                 url: format!("/models/{design}.glb"),
@@ -566,6 +591,7 @@ mod tests {
                 sockets: vec![Socket { name: "cap".into(), at: [0.0, 5.2, 0.0], kind: "capital".into(), size: [0.9; 3] }],
                 life: None,
                 item: None,
+                hung: None,
             },
             preview: format!("/models/{design}.png"),
             license: "CC0-1.0".into(),

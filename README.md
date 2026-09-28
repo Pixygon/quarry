@@ -33,7 +33,10 @@ turned, judged and made in:
   the same recipe at coarser meshing)
   and Grove (a plant: its species in a form and as JSON, from blank or from
   anything on the shelf, plus the **seed**, the **clock** — age in seasons,
-  season in the year — and whether it is **withered**). **Avatar**'s door
+  season in the year — and whether it is **withered** — and something from
+  the shelf to **hang** at its sockets: a lantern at every fruit socket. The
+  placements are facts, the artifact stays the bare plant an importer
+  instances onto, and the table instances them the same way). **Avatar**'s door
   takes a *manifested GLB* — the Portable Item Convention's own unit of
   exchange, one file that is the whole item — and does not derive it: it
   reads the file the way every consumer will, holds it to the convention

@@ -4,9 +4,18 @@ All notable changes to **Quarry**. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this file is
 materialized from the Pixygon Changelog API — edit there, not here.
 
-## [0.11.0] — 2026-10-02
+## [0.11.1] — 2026-10-02
 
-_Chisel's Maker door now lets you write and reuse raw models directly, not just pick from the shape library._
+_The store now survives redeploys instead of being wiped each time._
+
+### Changed
+- The republish-groves script is now only needed to populate a fresh store, rather than being a required step after every single deploy.
+
+### Fixed
+- The store is now backed by persistent storage and survives redeploys. Previously, every redeploy wiped the store, losing grown designs, verdicts, and other data that wasn't a reseeded starter; now that data stays put across deploys.
+
+
+## [0.11.0] — 2026-10-02
 
 ### Added
 - The Chisel door in the Maker now has two ways to build: pick a library shape as before, or switch to "Model" mode and write (or paste) Chisel's own raw model format directly — carving steps in order, each a shape in a mode, with the materials the parts wear. A hint below the editor lists the available primitives, modes, and fields.

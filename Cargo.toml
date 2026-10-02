@@ -1,6 +1,6 @@
 [package]
 name = "quarry"
-version = "0.11.0"
+version = "0.11.1"
 edition = "2021"
 description = "The Quarry — the Thread's model store: publish a recipe, the store derives the artifact. Models that are what they say they are."
 license = "MIT OR Apache-2.0"

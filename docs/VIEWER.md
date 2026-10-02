@@ -65,10 +65,14 @@ is the right addition so a person can look before they publish.
   Coolify (`GET <coolify>/api/v1/deploy?uuid=nvsfjj9yuxx2pkzwk4bcwp0v` with
   the token from `[publishing.coolify]` in `~/.config/dyson-swarm/config.toml`,
   read into the environment, never printed).
-- **Every redeploy wipes the store** until the founder mounts persistent
-  storage at `/data` in Coolify. After a deploy, republish the grove recipes
-  from `~/repos/thread-engine/crates/grove/recipes` (`thread grow <r> --publish`,
-  `QUARRY_TOKEN` from `[publishing.quarry]`).
+- **The store persists across redeploys — since 2026-10-02.** Before that
+  every deploy wiped it (nine starters reseeded, everything else gone — the
+  bowl's verdict was written four times). Verified on the first deploy after
+  the founder mounted storage: 56 models still there, a verdict with a
+  pre-deploy timestamp still on its entry. `scripts/republish-groves.sh` is
+  now a convenience for a fresh store, not a step after every deploy. Two
+  consequences: verdicts are durable, and so are orphans — a design that
+  forks now stays on the shelf, so a retire route is worth having.
 - Vendored crates come from `~/repos/thread-engine` via
   `scripts/sync-vendor.sh`. `thread-chisel`, `weft-lang` and
   `thread-manifest` are on crates.io at 0.2.2; once `thread-grove` is

@@ -119,9 +119,9 @@ release on the API → commit and push). Publishing to crates.io is a separate
 human step.
 
 **Deploying.** Shipping is not deploying: a push does not redeploy, so
-trigger Coolify by uuid. And until a
-persistent volume is mounted at `/data`, **every redeploy wipes the store** —
-the carved starters reseed themselves, the grown ones do not, so run
-`scripts/republish-groves.sh` (with `QUARRY_TOKEN` in the environment) after
-each deploy. The design id is the hash of the recipe, so they come back under
-the ids they had.
+trigger Coolify by uuid. The store lives on persistent storage at `/data`
+(since 2026-10-02) and survives a redeploy. On a fresh store the carved
+starters reseed themselves; `scripts/republish-groves.sh` (with
+`QUARRY_TOKEN` in the environment) puts back the grown ones, the lantern orb
+and the lit tree — the design id is the hash of the recipe, so they come
+back under the ids they had.

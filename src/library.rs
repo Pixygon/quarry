@@ -125,6 +125,32 @@ pub fn catalog() -> Value {
         "models": models,
         "materials": materials,
         "grove": { "blank": blank },
+        "chisel": chisel_blank(),
+    })
+}
+
+/// A raw Chisel model to start from: one rounded box on the ground in one
+/// plain stone, spelled tersely so the textarea reads as a recipe a person
+/// would write — and proved to parse as a `Model`, so the door never hands
+/// out a blank the store would refuse.
+pub fn chisel_blank() -> Value {
+    let blank = json!({
+        "name": "thing",
+        "nodes": [
+            { "prim": "box", "w": 1.0, "h": 0.6, "d": 0.6, "y": 0.3, "round": 0.04 }
+        ],
+        "materials": [
+            { "name": "stone", "color": [0.72, 0.70, 0.66, 1.0] }
+        ]
+    });
+    debug_assert!(serde_json::from_value::<infinite_manifest::model::Model>(blank.clone()).is_ok());
+    json!({
+        "blank": blank,
+        // The vocabulary, from the manifest crate's own docs — a hint under
+        // the textarea, not a schema.
+        "prims": ["box", "sphere", "cylinder", "capsule", "cone", "torus", "lathe", "ellipsoid"],
+        "modes": ["add", "blend", "cut", "intersect"],
+        "fields": "prim · mode · part · x y z · rot rx rz · axis · r r2 · h w d · round · k · profile",
     })
 }
 
@@ -168,6 +194,16 @@ mod tests {
         }
         assert!(!mats.contains(&"column"), "a shape is not a material");
         assert!(!mats.contains(&"tint"), "a material *modifier* takes arguments");
+    }
+
+    /// The raw-model blank must be a model the store accepts, or the door
+    /// opens on a refusal.
+    #[test]
+    fn the_chisel_blank_is_a_model() {
+        let b = chisel_blank();
+        let m: infinite_manifest::model::Model = serde_json::from_value(b["blank"].clone()).expect("the blank parses");
+        assert_eq!(m.nodes.len(), 1);
+        assert!(chisel::model::build(&m).is_ok(), "and it carves");
     }
 
     /// Grove's form is built from the grower's own blank.

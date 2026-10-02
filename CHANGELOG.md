@@ -4,9 +4,22 @@ All notable changes to **Quarry**. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this file is
 materialized from the Pixygon Changelog API — edit there, not here.
 
-## [0.10.0] — 2026-10-02
+## [0.11.0] — 2026-10-02
 
-_Added native Chisel model submissions with realistic material finishes (clearcoat, cloth, glass), exact analytic meshing for simple shapes, and billboard impostors for distant objects._
+_Chisel's Maker door now lets you write and reuse raw models directly, not just pick from the shape library._
+
+### Added
+- The Chisel door in the Maker now has two ways to build: pick a library shape as before, or switch to "Model" mode and write (or paste) Chisel's own raw model format directly — carving steps in order, each a shape in a mode, with the materials the parts wear. A hint below the editor lists the available primitives, modes, and fields.
+- When starting a model from scratch, you can now begin from a ready-made blank or from any of your previously published Chisel models, with the editor pre-filled and the title, kind, style, tags and codex carried over.
+
+### Improved
+- The recipe summary for Chisel items (in both the item page and the Maker preview) now shows the number of carving steps and materials used, instead of generic export arguments, making authored models easier to understand at a glance.
+
+### Fixed
+- Hidden elements in the Maker now reliably disappear regardless of their normal display style, fixing a case where the material selector could remain visible while editing a raw model.
+
+
+## [0.10.0] — 2026-10-02
 
 ### Added
 - Added support for submitting a model directly in Chisel's own format (carving steps and materials), as an alternative to the existing Weft-model library/arguments format. This lets agents author models the way they naturally write them, while still deduplicating identical designs regardless of how defaults are spelled out.

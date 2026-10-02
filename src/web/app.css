@@ -104,6 +104,10 @@ dialog.maker::backdrop{background:rgba(6,7,9,.72)}
    concept pane was always a grid row — the stage split top-and-bottom and the
    model got half the table. Say it once, here. */
 .pane[hidden]{display:none}
+/* …and the same for everything else: an element told to hide, hides, whatever
+   its display was. The material select stood in the Model mode of the Chisel
+   door for exactly this reason. */
+[hidden]{display:none!important}
 
 /* Phone: the header is the only thing that cannot simply stack, so it wraps
    and the motto stands down. No horizontal scroll, at any width. */

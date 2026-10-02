@@ -271,6 +271,13 @@ fn recipe_dl(e: &Entry) -> String {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "default".into());
         format!("<dt>Package</dt><dd>grove</dd><dt>Grown from</dt><dd>{rules} rules · seed {}</dd>", esc(&seed))
+    } else if r.package == "chisel" {
+        let (steps, mats) = r
+            .recipe
+            .as_ref()
+            .map(|m| (m["nodes"].as_array().map_or(0, Vec::len), m["materials"].as_array().map_or(0, Vec::len)))
+            .unwrap_or((0, 0));
+        format!("<dt>Package</dt><dd>chisel</dd><dt>Model</dt><dd>{steps} carving steps · {mats} materials</dd>")
     } else {
         let args = r.args.iter().map(num).collect::<Vec<_>>().join(", ");
         format!(
@@ -403,8 +410,16 @@ fn maker() -> String {
   <button data-door="avatar"><i style="background:var(--avatar)"></i>Avatar</button>
  </div>
  <div class="door" id="door-chisel">
-  <div class="shapes" id="shapes"></div>
-  <div class="grid" id="chisel-args"></div>
+  <div class="seg" id="chisel-mode" style="margin-bottom:12px"><button data-mode="shape" aria-pressed="true">Library shape</button><button data-mode="model" aria-pressed="false">Model</button></div>
+  <div id="chisel-shape">
+   <div class="shapes" id="shapes"></div>
+   <div class="grid" id="chisel-args"></div>
+  </div>
+  <div id="chisel-model" hidden>
+   <div class="grid" style="margin-bottom:10px"><div class="field"><label for="c-from">Start from</label><select id="c-from"></select></div></div>
+   <textarea class="json" id="c-json" spellcheck="false"></textarea>
+   <p class="note" id="c-hint">Chisel's own format: carving steps in order, each a prim in a mode, and the materials the parts wear. The store carves it, bakes it, measures it.</p>
+  </div>
   <h4>Words</h4>
   <div class="grid">
    <div class="field"><label for="c-title">Title</label><input id="c-title" placeholder="Doric column, 5.2 m"></div>

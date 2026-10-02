@@ -142,6 +142,8 @@ function show() {
   const r = m.recipe;
   $('#recipe').innerHTML = r.package === 'grove'
     ? `<dt>Package</dt><dd>grove</dd><dt>Grown from</dt><dd>${Object.keys(r.recipe || {}).length} rules · seed ${(r.recipe || {}).seed ?? 'default'}</dd>`
+    : r.package === 'chisel'
+    ? `<dt>Package</dt><dd>chisel</dd><dt>Model</dt><dd>${((r.recipe || {}).nodes || []).length} carving steps · ${((r.recipe || {}).materials || []).length} materials</dd>`
     : `<dt>Package</dt><dd>${esc(r.package)}</dd><dt>Export</dt><dd>${esc(r.export)}(${(r.args || []).map(trim).join(', ')})</dd><dt>Material</dt><dd>${esc(r.material || 'its own')}</dd>`;
   $('#recipe-json').textContent = JSON.stringify(r.recipe || { export: r.export, args: r.args, material: r.material }, null, 1);
 
@@ -538,6 +540,10 @@ $('#a-again').onclick = async () => {
 };
 
 function submissionOf(m) {
+  if (m.recipe.package === 'chisel') {
+    return { package: 'chisel', recipe: m.recipe.recipe, title: m.title, description: m.description, tags: m.tags, kind: m.kind, style: m.style,
+      license: m.license, author: m.author, origin: m.origin, codex: m.codex, concept: m.concept, rest: !!m.recipe.rest };
+  }
   if (m.recipe.package === 'avatar') {
     return { package: 'avatar', source: m.design, title: m.title, tags: m.tags, style: m.style, codex: m.codex, concept: m.concept };
   }
@@ -577,7 +583,36 @@ function msg(t, bad) {
   el.className = 'msg' + (bad ? ' err' : t ? ' ok' : '');
 }
 
+// Two spellings of a carved thing: a library shape with arguments, or the
+// model itself — Chisel's own format, as an agent writes it.
+let chiselMode = 'shape';
+let modelText = '';
+
 function chiselDoor() {
+  for (const b of $$('#chisel-mode button')) b.onclick = () => {
+    chiselMode = b.dataset.mode;
+    for (const x of $$('#chisel-mode button')) x.setAttribute('aria-pressed', String(x === b));
+    $('#chisel-shape').hidden = chiselMode !== 'shape';
+    $('#chisel-model').hidden = chiselMode !== 'model';
+    $('#c-material').closest('.field').hidden = chiselMode === 'model';
+    // The words follow the mode: a blank model is a prop until it is named,
+    // not whatever the last library shape was.
+    if (chiselMode === 'model' && !$('#c-from').value) { $('#c-title').value = ''; $('#c-kind').value = 'prop'; $('#c-tags').value = ''; $('#c-rest').checked = false; }
+    else if (chiselMode === 'shape' && shape) pickShape(shape.export);
+    msg('');
+  };
+  const c = LIB.chisel || {};
+  $('#c-hint').textContent = `prims: ${(c.prims || []).join(' · ')} — modes: ${(c.modes || []).join(' · ')} — fields: ${c.fields || ''}`;
+  modelList();
+  $('#c-from').onchange = () => {
+    const m = MODELS.find((x) => x.design === $('#c-from').value);
+    const model = m ? (m.recipe.recipe || {}) : (c.blank || {});
+    $('#c-json').value = JSON.stringify(model, null, 1);
+    if (m) { $('#c-title').value = m.title; $('#c-kind').value = m.kind; $('#c-style').value = m.style || ''; $('#c-tags').value = m.tags.join(', '); $('#c-codex').value = m.codex || ''; $('#c-rest').checked = !!m.recipe.rest; }
+    msg('');
+  };
+  $('#c-json').value = JSON.stringify(c.blank || {}, null, 1);
+  $('#c-json').oninput = () => { try { JSON.parse($('#c-json').value); msg(''); } catch { msg('the model is not valid JSON yet', true); } };
   $('#shapes').innerHTML = LIB.models.map((s) => `<button data-e="${s.export}">${s.label}</button>`).join('');
   $('#c-material').innerHTML = '<option value="">its own</option>' + LIB.materials.map((m) => `<option>${m}</option>`).join('');
   for (const b of $$('#shapes button')) b.onclick = () => pickShape(b.dataset.e);
@@ -597,7 +632,26 @@ function pickShape(name) {
   $('#c-rest').checked = !!shape.centred;
 }
 
+function modelList() {
+  const raw = MODELS.filter((m) => m.recipe.package === 'chisel');
+  $('#c-from').innerHTML = '<option value="">a blank model</option>' + raw.map((m) => `<option value="${m.design}">${esc(m.title)}</option>`).join('');
+}
+
 function chiselSubmission() {
+  if (chiselMode === 'model') {
+    let model;
+    try { model = JSON.parse($('#c-json').value); } catch { throw new Error('the model is not valid JSON'); }
+    return {
+      title: $('#c-title').value.trim() || model.name || 'A model',
+      kind: $('#c-kind').value.trim() || 'prop',
+      style: $('#c-style').value.trim(),
+      tags: $('#c-tags').value.split(',').map((t) => t.trim()).filter(Boolean),
+      package: 'chisel', export: '', args: [], recipe: model, material: '',
+      codex: $('#c-codex').value.trim(),
+      origin: 'authored',
+      rest: $('#c-rest').checked,
+    };
+  }
   const args = shape.args.map((a, i) => {
     const v = parseFloat($('#ca-' + i).value);
     return Number.isFinite(v) ? v : a.default;
@@ -810,7 +864,7 @@ $('#m-derive').onclick = () => run('/derive', (e) => {
 
 $('#m-publish').onclick = () => run('/publish', (e) => {
   replace(e);
-  if (LIB) hangList();
+  if (LIB) { hangList(); modelList(); }
   state.preview = null;
   state.design = e.design;
   state.lod = 0;

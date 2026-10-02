@@ -26,6 +26,8 @@ pub struct SceneMesh<'a> {
     pub emissive: f32,
     /// Leaves and thin cards render both faces; solid parts cull the back.
     pub double_sided: bool,
+    /// Clearcoat, sheen, glass… written as the glTF material extensions.
+    pub finish: crate::model::Finish,
 }
 
 /// One placed node of an exported scene (TRS, glTF conventions).
@@ -48,7 +50,7 @@ pub fn write_glb(mesh: &MeshData, baked: Option<&Baked>, name: &str) -> Result<V
             baked,
             base_color: [1.0; 4],
             emissive: 0.0,
-            double_sided: false,
+            finish: Default::default(), double_sided: false,
         }],
         &[SceneNode {
             name: name.into(),
@@ -82,6 +84,7 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
     let mut images: Vec<serde_json::Value> = Vec::new();
     let mut textures: Vec<serde_json::Value> = Vec::new();
     let mut materials: Vec<serde_json::Value> = Vec::new();
+    let mut used: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
     let mut gltf_meshes: Vec<serde_json::Value> = Vec::new();
 
     for sm in meshes {
@@ -114,11 +117,13 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
             &mut bin,
             &f32s(&mesh.colors.iter().flatten().copied().collect::<Vec<_>>()),
         );
-        // TEXCOORD_1 only when the mesh has one per vertex; otherwise the
+        // TEXCOORD_1..3 only when the mesh has one per vertex; otherwise the
         // attribute is simply absent, as it always was.
-        let uv2 = (!mesh.uv2.is_empty() && mesh.uv2.len() == mesh.positions.len()).then(|| {
-            push_view(&mut bin, &f32s(&mesh.uv2.iter().flatten().copied().collect::<Vec<_>>()))
-        });
+        let extra: Vec<(u32, usize)> = [(1u32, &mesh.uv2), (2, &mesh.uv3), (3, &mesh.uv4)]
+            .into_iter()
+            .filter(|(_, set)| !set.is_empty() && set.len() == mesh.positions.len())
+            .map(|(n, set)| (n, push_view(&mut bin, &f32s(&set.iter().flatten().copied().collect::<Vec<_>>()))))
+            .collect();
 
         // Position bounds (required by the spec for POSITION accessors).
         let mut pmin = [f32::INFINITY; 3];
@@ -139,9 +144,9 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
         accessors.push(serde_json::json!({ "bufferView": cv, "componentType": 5126, "count": vcount, "type": "VEC4" }));
         let mut attributes = serde_json::json!({ "POSITION": a0 + 1, "NORMAL": a0 + 2, "TEXCOORD_0": a0 + 3,
                                                  "TANGENT": a0 + 4, "COLOR_0": a0 + 5 });
-        if let Some(view) = uv2 {
+        for (n, view) in extra {
             accessors.push(serde_json::json!({ "bufferView": view, "componentType": 5126, "count": vcount, "type": "VEC2" }));
-            attributes["TEXCOORD_1"] = serde_json::json!(accessors.len() - 1);
+            attributes[format!("TEXCOORD_{n}")] = serde_json::json!(accessors.len() - 1);
         }
 
         // The complete PBR set, glTF-canonical: base color, the ORM texture
@@ -179,7 +184,8 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
                     "baseColorFactor": sm.base_color,
                     "baseColorTexture": { "index": tex_indices[0] },
                     "metallicRoughnessTexture": { "index": tex_indices[1] },
-                    "metallicFactor": 1.0, "roughnessFactor": 1.0,
+                    "metallicFactor": sm.finish.metallic.map(|v| v.clamp(0.0, 1.0)).unwrap_or(1.0),
+                    "roughnessFactor": sm.finish.roughness.map(|v| v.clamp(0.0, 1.0)).unwrap_or(1.0),
                 },
                 "occlusionTexture": { "index": tex_indices[1], "strength": 1.0 },
                 "normalTexture": { "index": tex_indices[2], "scale": 1.0 },
@@ -191,18 +197,30 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
                     "KHR_materials_emissive_strength": { "emissiveStrength": sm.emissive },
                 });
             }
+            // A base colour map with holes in it is a cutout — an impostor's
+            // atlas, a leaf card — and says so, or every engine fills the holes.
+            if b.albedo.chunks_exact(4).any(|px| px[3] < 250) {
+                mat["alphaMode"] = serde_json::json!("MASK");
+                mat["alphaCutoff"] = serde_json::json!(0.5);
+            }
             mat
         } else {
             serde_json::json!({
                 "name": sm.name,
                 "pbrMetallicRoughness": {
                     "baseColorFactor": sm.base_color,
-                    "metallicFactor": 0.0, "roughnessFactor": 1.0,
+                    "metallicFactor": sm.finish.metallic.map(|v| v.clamp(0.0, 1.0)).unwrap_or(0.0),
+                    "roughnessFactor": sm.finish.roughness.map(|v| v.clamp(0.0, 1.0)).unwrap_or(1.0),
                 },
                 "emissiveFactor": emissive_rgb,
                 "doubleSided": sm.double_sided,
             })
         };
+        let mut material = material;
+        if sm.emissive > 1.0 && material.get("extensions").is_none() {
+            material["extensions"] = serde_json::json!({ "KHR_materials_emissive_strength": { "emissiveStrength": sm.emissive } });
+        }
+        add_finish(&mut material, &sm.finish, sm.base_color, &mut used);
         materials.push(material);
         gltf_meshes.push(serde_json::json!({
             "name": sm.name,
@@ -224,13 +242,13 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
         })
         .collect();
     let uses_emissive_strength = meshes.iter().any(|m| m.emissive > 1.0);
+    let mut ext_used: Vec<&str> = used.into_iter().collect();
+    if uses_emissive_strength { ext_used.push("KHR_materials_emissive_strength"); }
+    ext_used.sort();
+    ext_used.dedup();
     let json = serde_json::json!({
         "asset": { "version": "2.0", "generator": "chisel (the Thread)" },
-        "extensionsUsed": if uses_emissive_strength {
-            vec!["KHR_materials_emissive_strength"]
-        } else {
-            Vec::new()
-        },
+        "extensionsUsed": ext_used,
         "scene": 0,
         "scenes": [{ "nodes": (0..nodes.len()).collect::<Vec<_>>() }],
         "nodes": gltf_nodes,
@@ -264,4 +282,39 @@ pub fn write_glb_scene(meshes: &[SceneMesh], nodes: &[SceneNode]) -> Result<Vec<
     out.extend_from_slice(b"BIN\0");
     out.extend_from_slice(&bin);
     Ok(out)
+}
+
+/// Write a part's finish as the standard glTF material extensions, so three.js,
+/// Unity's glTFast and Blender all show the lacquer, the cloth and the glass.
+/// Nothing is written for a plain finish: old exports stay byte-identical.
+fn add_finish(mat: &mut serde_json::Value, f: &crate::model::Finish, base: [f32; 4], used: &mut std::collections::BTreeSet<&'static str>) {
+    let mut ext = mat.get("extensions").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let unit = |v: f32| v.clamp(0.0, 1.0);
+    if let Some(c) = f.clearcoat.filter(|c| *c > 0.0) {
+        ext["KHR_materials_clearcoat"] = serde_json::json!({ "clearcoatFactor": unit(c), "clearcoatRoughnessFactor": unit(f.clearcoat_roughness.unwrap_or(0.1)) });
+        used.insert("KHR_materials_clearcoat");
+    }
+    if let Some(s) = f.sheen.filter(|s| *s > 0.0) {
+        // The sheen takes the part's own colour, lifted toward white (cloth catches light paler than it is).
+        let tint = |c: f32| unit(c + (1.0 - c) * 0.5) * unit(s);
+        ext["KHR_materials_sheen"] = serde_json::json!({ "sheenColorFactor": [tint(base[0]), tint(base[1]), tint(base[2])], "sheenRoughnessFactor": unit(f.sheen_roughness.unwrap_or(0.5)) });
+        used.insert("KHR_materials_sheen");
+    }
+    if let Some(t) = f.transmission.filter(|t| *t > 0.0) {
+        ext["KHR_materials_transmission"] = serde_json::json!({ "transmissionFactor": unit(t) });
+        used.insert("KHR_materials_transmission");
+        let mut vol = serde_json::json!({ "thicknessFactor": f.thickness.unwrap_or(0.3).max(0.0) });
+        if let Some(d) = f.attenuation_distance.filter(|d| *d > 0.0) { vol["attenuationDistance"] = serde_json::json!(d); }
+        let ac = f.attenuation_color.unwrap_or([base[0], base[1], base[2]]);
+        if f.attenuation_distance.is_some() || f.attenuation_color.is_some() { vol["attenuationColor"] = serde_json::json!([unit(ac[0]), unit(ac[1]), unit(ac[2])]); }
+        ext["KHR_materials_volume"] = vol;
+        used.insert("KHR_materials_volume");
+    }
+    if let Some(i) = f.ior.filter(|i| *i >= 1.0) {
+        ext["KHR_materials_ior"] = serde_json::json!({ "ior": i });
+        used.insert("KHR_materials_ior");
+    }
+    if ext.as_object().is_some_and(|o| !o.is_empty()) {
+        mat["extensions"] = ext;
+    }
 }

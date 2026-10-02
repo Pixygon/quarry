@@ -13,8 +13,10 @@
 //! express, at a resolution the manifest chooses (load-time cost only —
 //! never in the frame loop; a 40³ grid meshes in well under a millisecond).
 
+pub mod analytic;
 pub mod builtin;
 pub mod gltf;
+pub mod impostor;
 pub mod model;
 pub mod preview;
 pub mod terrain;
@@ -46,16 +48,84 @@ pub struct MeshData {
     /// can hit-test a swing against the wood without asking anyone. Either
     /// empty or one entry per vertex; the exporter writes it only when full.
     pub uv2: Vec<[f32; 2]>,
+    /// `TEXCOORD_2` and `TEXCOORD_3`: the wind, as Grove writes it —
+    /// `(trunk sway, branch sway)` and `(leaf flutter, phase)`; the colour's
+    /// alpha stays rigidity for everything that already reads it. Same rule as
+    /// `uv2`: empty, or one entry per vertex.
+    pub uv3: Vec<[f32; 2]>,
+    pub uv4: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
 }
 
 /// Signed distance from `p` to the shape's surface (negative inside).
 pub fn eval(shape: &Shape, p: [f32; 3]) -> f32 {
     match shape {
-        Shape::Prim(prim) => eval_prim(prim, local(p, prim.at, prim.rot)),
-        Shape::Group(g) => eval_group(g, local(p, g.at, g.rot)),
+        Shape::Prim(prim) => eval_prim(prim, tilted(local(p, prim.at, prim.rot), prim.rx, prim.rz)),
+        Shape::Group(g) => eval_group(g, tilted(local(p, g.at, g.rot), g.rx, g.rz)),
         Shape::Lathe(l) => eval_lathe(l, local(p, l.at, 0.0)),
     }
+}
+
+/// The curvature wear the carve bakes into vertex colour: convex edges
+/// lighten, concave crevices darken. The same laplacian for every path.
+fn wear(shape: &Shape, v: [f32; 3], e: f32) -> [f32; 4] {
+    let d0 = eval(shape, v);
+    let lap = (eval(shape, [v[0] + e, v[1], v[2]])
+        + eval(shape, [v[0] - e, v[1], v[2]])
+        + eval(shape, [v[0], v[1] + e, v[2]])
+        + eval(shape, [v[0], v[1] - e, v[2]])
+        + eval(shape, [v[0], v[1], v[2] + e])
+        + eval(shape, [v[0], v[1], v[2] - e])
+        - 6.0 * d0)
+        / (e * e);
+    let cell = e * 2.0;
+    let shade = (1.0 + 0.28 * (lap * cell * 0.8).tanh()).clamp(0.65, 1.25);
+    [shade, shade, shade, 1.0]
+}
+
+/// Newton-project a point onto the shape's surface (distance 0), at most
+/// one cell away from where it started.
+fn project_to_surface(shape: &Shape, start: [f32; 3], cell: f32) -> [f32; 3] {
+    let mut v = start;
+    let h = cell * 0.05;
+    for _ in 0..4 {
+        let d = eval(shape, v);
+        if d.abs() < cell * 1e-3 {
+            break;
+        }
+        let g = [
+            (eval(shape, [v[0] + h, v[1], v[2]]) - eval(shape, [v[0] - h, v[1], v[2]])) / (2.0 * h),
+            (eval(shape, [v[0], v[1] + h, v[2]]) - eval(shape, [v[0], v[1] - h, v[2]])) / (2.0 * h),
+            (eval(shape, [v[0], v[1], v[2] + h]) - eval(shape, [v[0], v[1], v[2] - h])) / (2.0 * h),
+        ];
+        let gg = g[0] * g[0] + g[1] * g[1] + g[2] * g[2];
+        if !gg.is_finite() || gg < 1e-8 {
+            break;
+        }
+        for c in 0..3 {
+            v[c] -= d * g[c] / gg;
+        }
+    }
+    let moved = ((v[0] - start[0]).powi(2) + (v[1] - start[1]).powi(2) + (v[2] - start[2]).powi(2)).sqrt();
+    if !moved.is_finite() || moved > cell {
+        start
+    } else {
+        v
+    }
+}
+
+/// Undo a part's tilt (about X, then Z) on a point already in its yawed frame.
+fn tilted(q: [f32; 3], rx_deg: f32, rz_deg: f32) -> [f32; 3] {
+    let mut q = q;
+    if rx_deg != 0.0 {
+        let (s, c) = (-rx_deg).to_radians().sin_cos();
+        q = [q[0], q[1] * c - q[2] * s, q[1] * s + q[2] * c];
+    }
+    if rz_deg != 0.0 {
+        let (s, c) = (-rz_deg).to_radians().sin_cos();
+        q = [q[0] * c - q[1] * s, q[0] * s + q[1] * c, q[2]];
+    }
+    q
 }
 
 fn local(p: [f32; 3], at: [f32; 3], rot_deg: f32) -> [f32; 3] {
@@ -91,8 +161,19 @@ fn eval_prim(pr: &Prim, p: [f32; 3]) -> f32 {
             outside + q[0].max(q[1]).max(q[2]).min(0.0) - pr.rounded
         }
         "cylinder" => {
-            let d = [len2(p[0], p[2]) - pr.r, p[1].abs() - pr.h / 2.0];
-            len2(d[0].max(0.0), d[1].max(0.0)) + d[0].max(d[1]).min(0.0)
+            // `rounded` softens both rims (a turned leg, a coaster), inside the size.
+            let rd = pr.rounded.clamp(0.0, pr.r.min(pr.h / 2.0));
+            let d = [len2(p[0], p[2]) - pr.r + rd, p[1].abs() - pr.h / 2.0 + rd];
+            len2(d[0].max(0.0), d[1].max(0.0)) + d[0].max(d[1]).min(0.0) - rd
+        }
+        "ellipsoid" => {
+            // Radii = half the size. The usual bound (exact on the axes, a
+            // close underestimate between), smooth enough to mesh and shade.
+            let s = pr.size.unwrap_or([1.0; 3]);
+            let r = [(s[0] / 2.0).max(1e-4), (s[1] / 2.0).max(1e-4), (s[2] / 2.0).max(1e-4)];
+            let k0 = len3([p[0] / r[0], p[1] / r[1], p[2] / r[2]]);
+            let k1 = len3([p[0] / (r[0] * r[0]), p[1] / (r[1] * r[1]), p[2] / (r[2] * r[2])]).max(1e-6);
+            k0 * (k0 - 1.0) / k1
         }
         "capsule" => {
             let half = (pr.h / 2.0 - pr.r).max(0.0);
@@ -258,8 +339,36 @@ pub fn mesh_with(shape: &Shape, opts: MeshOptions) -> MeshData {
     // ends up faintly quilted). A box is twelve triangles and six perfect
     // normals; take them.
     if let Shape::Prim(p) = shape {
-        if p.prim == "box" && p.rounded == 0.0 {
+        if p.prim == "box" && p.rounded == 0.0 && p.rx == 0.0 && p.rz == 0.0 {
             return exact_box(p, opts.uv_scale);
+        }
+        // Any other lone primitive has a formula: build it from that, exact
+        // and light, instead of sampling it (see analytic.rs).
+        let res = opts.resolution.unwrap_or(DEFAULT_RESOLUTION);
+        if let Some(mut m) = analytic::mesh_prim(p, res) {
+            let (bmin, bmax) = shape.bounds();
+            let longest = (bmax[0] - bmin[0]).max(bmax[1] - bmin[1]).max(bmax[2] - bmin[2]).max(1e-3);
+            let e = longest / res.clamp(8, MAX_RESOLUTION) as f32 * 0.5;
+            for (i, v) in m.positions.clone().into_iter().enumerate() {
+                m.colors[i] = wear(shape, v, e);
+            }
+            project_uvs(&mut m, opts.uv.resolve(shape), opts.uv_scale, center_of(shape));
+            weld(&mut m);
+            return m;
+        }
+    }
+    if let Shape::Lathe(l) = shape {
+        let res = opts.resolution.unwrap_or(DEFAULT_RESOLUTION);
+        if let Some(mut m) = analytic::mesh_lathe(&l.lathe, l.at, res) {
+            let (bmin, bmax) = shape.bounds();
+            let longest = (bmax[0] - bmin[0]).max(bmax[1] - bmin[1]).max(bmax[2] - bmin[2]).max(1e-3);
+            let e = longest / res.clamp(8, MAX_RESOLUTION) as f32 * 0.5;
+            for (i, v) in m.positions.clone().into_iter().enumerate() {
+                m.colors[i] = wear(shape, v, e);
+            }
+            project_uvs(&mut m, opts.uv.resolve(shape), opts.uv_scale, center_of(shape));
+            weld(&mut m);
+            return m;
         }
     }
     let resolution = opts.resolution;
@@ -338,15 +447,23 @@ pub fn mesh_with(shape: &Shape, opts: MeshOptions) -> MeshData {
                     }
                 }
                 if count > 0 {
-                    let v = [
+                    let mean = [
                         sum[0] / count as f32,
                         sum[1] / count as f32,
                         sum[2] / count as f32,
                     ];
+                    // The mean of the crossings sits near the surface, not on
+                    // it: flats quilt and rounded edges go lumpy. Pull it onto
+                    // the zero set with a few Newton steps along the gradient,
+                    // and keep the old spot if that would wander out of the
+                    // cell (a sharp concave corner could fold the mesh).
+                    let v = project_to_surface(shape, mean, cell);
                     cell_vertex[cidx(i, j, k)] = out.positions.len() as u32;
                     out.positions.push(v);
-                    // Smooth normal: normalized SDF gradient (central differences).
-                    let e = cell * 0.5;
+                    // Smooth normal: normalized SDF gradient (central
+                    // differences), sampled tight now the vertex is on the
+                    // surface, so a small rounding reads as a crisp edge.
+                    let e = cell * 0.15;
                     let g = [
                         eval(shape, [v[0] + e, v[1], v[2]]) - eval(shape, [v[0] - e, v[1], v[2]]),
                         eval(shape, [v[0], v[1] + e, v[2]]) - eval(shape, [v[0], v[1] - e, v[2]]),

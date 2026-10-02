@@ -4,6 +4,20 @@ All notable changes to **Quarry**. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this file is
 materialized from the Pixygon Changelog API — edit there, not here.
 
+## [0.10.0] — 2026-10-02
+
+_Added native Chisel model submissions with realistic material finishes (clearcoat, cloth, glass), exact analytic meshing for simple shapes, and billboard impostors for distant objects._
+
+### Added
+- Added support for submitting a model directly in Chisel's own format (carving steps and materials), as an alternative to the existing Weft-model library/arguments format. This lets agents author models the way they naturally write them, while still deduplicating identical designs regardless of how defaults are spelled out.
+- Models can now carry a 'finish' — clearcoat, sheen/cloth, and glass/transmission — which is exported as standard glTF material extensions (clearcoat, sheen, transmission, volume, IOR). This means lacquered, fabric, and glass-like surfaces now render correctly in three.js, Unity glTFast, Blender and other standard viewers instead of looking flat.
+- Added an impostor generator that bakes eight turntable views of a model into a single billboard atlas, which can stand in for the full mesh at a distance for much cheaper rendering of scenes with many repeated objects (e.g. forests).
+
+### Improved
+- Single primitive shapes (boxes, cylinders, cones, capsules, spheres, ellipsoids, and tori) are now meshed with exact analytic geometry instead of the general surface-nets carving pipeline. This produces far fewer triangles with crisp, exact rounding and normals for simple parts, while more complex carved shapes are unaffected.
+- Exported glTF files now support up to three extra UV channels (TEXCOORD_1 through TEXCOORD_3) where needed, and base-color textures with transparent holes (e.g. leaf cards, impostor atlases) are now correctly marked as alpha-cutout materials so renderers don't fill in the holes.
+
+
 ## [0.9.0] — 2026-09-28
 
 ### Added

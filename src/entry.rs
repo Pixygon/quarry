@@ -350,10 +350,25 @@ fn make(sub: &Submission, dir: &Path, shelf: &Path, url: &str, shelve: bool) -> 
     let mut manifest: Option<serde_json::Value> = None;
     let (built, sockets, lod_models): (chisel::model::Built, Vec<Socket>, Vec<chisel::model::Built>) =
         match sub.package.as_str() {
-            "weft-model" => {
-                let library = chisel::weft_model::standard_library();
-                let material = (!sub.material.is_empty()).then_some(sub.material.as_str());
-                let model = chisel::weft_model::eval_model_or_part(&library, &sub.export, &sub.args, material)?;
+            "weft-model" | "chisel" => {
+                // Two spellings of a carved thing: a Weft library export with
+                // arguments, or the model itself — Chisel's own format, the
+                // carving steps and their materials, as an agent writes it.
+                let model = if sub.package == "chisel" {
+                    let value = sub.recipe.clone().ok_or("a chisel submission carries its model in `recipe`")?;
+                    let model: infinite_manifest::model::Model = serde_json::from_value(value).map_err(|e| format!("not a Chisel model: {e}"))?;
+                    if model.nodes.is_empty() || model.nodes.len() > MAX_CHISEL_NODES {
+                        return Err(format!("a model has 1 to {MAX_CHISEL_NODES} carving steps"));
+                    }
+                    if model.materials.len() > MAX_CHISEL_PARTS {
+                        return Err(format!("a model has at most {MAX_CHISEL_PARTS} materials"));
+                    }
+                    model
+                } else {
+                    let library = chisel::weft_model::standard_library();
+                    let material = (!sub.material.is_empty()).then_some(sub.material.as_str());
+                    chisel::weft_model::eval_model_or_part(&library, &sub.export, &sub.args, material)?
+                };
                 let mut built = chisel::model::build(&model)?;
                 // Coarser LODs from the same recipe: the carving grid and the
                 // bake at a half and a quarter. A 21 000-triangle sphere is
@@ -638,6 +653,9 @@ fn design_id(sub: &Submission) -> String {
 /// exhaustive) are one design — and a new recipe field with a default does
 /// not fork every existing design (the 2026-09-26 `leaves` lesson).
 fn canonical_recipe(sub: &Submission) -> Option<serde_json::Value> {
+    if sub.package == "chisel" {
+        return canonical_model(sub.recipe.as_ref()?);
+    }
     if sub.package != "grove" {
         return None;
     }
@@ -654,6 +672,50 @@ fn canonical_recipe(sub: &Submission) -> Option<serde_json::Value> {
     };
     obj.retain(|k, v| def.get(k) != Some(v));
     Some(serde_json::Value::Object(obj))
+}
+
+/// The most carving steps and materials one chisel submission may carry: a
+/// bookshelf with its thirty books is ~40 steps; this leaves room and keeps a
+/// publish from asking the server to carve a city.
+pub const MAX_CHISEL_NODES: usize = 400;
+pub const MAX_CHISEL_PARTS: usize = 32;
+
+/// A Chisel model reduced to what it actually says: parsed, every number
+/// rounded, and in every step and material each field equal to a blank
+/// one's dropped — so `{"prim":"sphere"}` and the same sphere spelled out
+/// in full are one design, and a field Chisel gains tomorrow (with a
+/// default) does not rename every carved thing on the shelf.
+fn canonical_model(value: &serde_json::Value) -> Option<serde_json::Value> {
+    use infinite_manifest::model::{Model, Node, PartMaterial};
+    let model: Model = serde_json::from_value(value.clone()).ok()?;
+    let blank_node = |prim: &str| -> serde_json::Value {
+        serde_json::from_value::<Node>(serde_json::json!({ "prim": prim }))
+            .ok()
+            .and_then(|n| serde_json::to_value(n).ok())
+            .map(canonical_numbers)
+            .unwrap_or_default()
+    };
+    let strip = |v: serde_json::Value, blank: &serde_json::Value| -> serde_json::Value {
+        match (v, blank.as_object()) {
+            (serde_json::Value::Object(mut o), Some(b)) => {
+                o.retain(|k, x| k == "prim" || b.get(k) != Some(x));
+                serde_json::Value::Object(o)
+            }
+            (v, _) => v,
+        }
+    };
+    let blank_mat = canonical_numbers(serde_json::to_value(PartMaterial::default()).ok()?);
+    let nodes: Vec<serde_json::Value> = model
+        .nodes
+        .iter()
+        .map(|n| strip(canonical_numbers(serde_json::to_value(n).unwrap_or_default()), &blank_node(&n.prim)))
+        .collect();
+    let materials: Vec<serde_json::Value> = model
+        .materials
+        .iter()
+        .map(|m| strip(canonical_numbers(serde_json::to_value(m).unwrap_or_default()), &blank_mat))
+        .collect();
+    Some(serde_json::json!({ "name": model.name, "nodes": nodes, "materials": materials }))
 }
 
 /// A hang as the recipe says it: the design, and only the rules that
@@ -682,6 +744,7 @@ fn compose(plant: &chisel::model::Built, thing: &chisel::model::Built, placement
             color: p.color,
             emissive: p.emissive,
             double_sided: p.double_sided,
+            finish: p.finish.clone(),
         })
         .collect();
     for pl in placements {
@@ -703,6 +766,7 @@ fn compose(plant: &chisel::model::Built, thing: &chisel::model::Built, placement
                 color: p.color,
                 emissive: p.emissive,
                 double_sided: p.double_sided,
+                finish: p.finish.clone(),
             });
         }
     }
@@ -910,6 +974,63 @@ mod tests {
             rest: false,
             hang: None,
         }
+    }
+
+    fn chair(recipe: serde_json::Value) -> Submission {
+        let mut s = column("Chair", 1.0);
+        s.package = "chisel".into();
+        s.export = String::new();
+        s.args = Vec::new();
+        s.material = String::new();
+        s.kind = "furniture".into();
+        s.recipe = Some(recipe);
+        s
+    }
+
+    /// The model itself as the recipe: carved, finished (glass, cloth,
+    /// lacquer reach the glTF), and named by what it says, not how.
+    #[test]
+    fn a_chisel_model_is_carved_and_named_by_what_it_says() {
+        let data = tmp("chisel");
+        let terse = serde_json::json!({ "name": "chair",
+            "nodes": [
+                { "prim": "box", "w": 0.62, "h": 0.07, "d": 0.6, "round": 0.03, "y": 0.43 },
+                { "prim": "cylinder", "r": 0.03, "h": 0.42, "x": -0.25, "y": 0.21, "z": 0.3, "rz": 8 },
+                { "prim": "sphere", "part": 1, "r": 0.1, "y": 0.6 } ],
+            "materials": [ { "name": "wood", "color": [0.7, 0.3, 0.1, 1.0], "surface": "gloss" },
+                           { "name": "glass", "surface": "glass" } ] });
+        let e = derive(&chair(terse.clone()), &data).expect("derives");
+        assert_eq!(e.supplier, "chisel");
+        assert!(e.artifact.tris > 100 && e.artifact.tris < 20_000, "exact and light: {} tris", e.artifact.tris);
+        let glb = std::fs::read(data.join(format!("{}.glb", e.design))).unwrap();
+        let text = String::from_utf8_lossy(&glb);
+        assert!(text.contains("KHR_materials_clearcoat") && text.contains("KHR_materials_transmission"), "finishes exported");
+        // the same chair spelled out in full is the same design
+        let mut full = terse.clone();
+        for n in full["nodes"].as_array_mut().unwrap() {
+            n["mode"] = serde_json::json!("add");
+            n["axis"] = serde_json::json!("y");
+            if n.get("part").is_none() { n["part"] = serde_json::json!(0); }
+        }
+        full["materials"][1]["uv"] = serde_json::json!("auto");
+        assert_eq!(design_id(&chair(full)), e.design, "defaults spelled out do not fork the design");
+        let mut other = terse.clone();
+        other["nodes"][0]["w"] = serde_json::json!(0.7);
+        assert_ne!(design_id(&chair(other)), e.design, "a wider seat is another chair");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn a_chisel_model_that_is_not_one_is_refused() {
+        let data = tmp("chisel-bad");
+        assert!(derive(&chair(serde_json::json!({ "nodes": [] })), &data).is_err(), "empty");
+        assert!(derive(&chair(serde_json::json!({ "nodes": [{ "prim": "teapot" }] })), &data).is_err(), "unknown prim");
+        let many: Vec<serde_json::Value> = (0..MAX_CHISEL_NODES + 1).map(|i| serde_json::json!({ "prim": "sphere", "r": 0.01, "x": i as f32 * 0.03 })).collect();
+        assert!(derive(&chair(serde_json::json!({ "nodes": many })), &data).is_err(), "too many steps");
+        let mut no_recipe = chair(serde_json::json!({}));
+        no_recipe.recipe = None;
+        assert!(derive(&no_recipe, &data).is_err(), "no recipe");
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     /// Carved things get coarser levels from the same recipe, each with

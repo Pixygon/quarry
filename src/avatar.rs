@@ -278,11 +278,13 @@ fn walk(doc: &gltf::Document, buffers: &[gltf::buffer::Data]) -> (Vec<BuiltPart>
                         colors,
                         uv2: vec![[0.0, 0.0]; n],
                         indices,
+                        ..Default::default()
                     },
                     baked: None,
                     color,
                     emissive: mat.emissive_factor().iter().cloned().fold(0.0, f32::max),
                     double_sided: mat.double_sided(),
+                    finish: Default::default(),
                 });
             }
         }
